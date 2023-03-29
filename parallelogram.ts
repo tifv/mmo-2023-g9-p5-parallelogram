@@ -80,9 +80,16 @@ function select_flowing_sector(region: UncutRegion): FlowDirections {
     let {
         forward:  {vertex: sector_start, index: start_index},
         backward: {vertex: sector_end,   index: end_index},
-    } = region.polygon.find_tangent_point(diagonal);
-    if (end_index != start_index + region.polygon.edges.length / 2) {
-        throw new Error("Some problems with indices or something");
+    } = region.polygon.find_tangent_points(diagonal.opposite());
+    if (
+        sector_start === sector_end ||
+        modulo(end_index - start_index, region.polygon.edges.length) !=
+            region.polygon.edges.length / 2
+    ) {
+        let error:any = new Error(
+            "Sector boundaries are not exactly opposite" );
+        error.info = {select_flowing_sector: {start_index, end_index}};
+        throw error;
     }
     let vectors = region.polygon.slice_edges(start_index, end_index)
         .map(edge => edge.delta);
@@ -92,24 +99,10 @@ function select_flowing_sector(region: UncutRegion): FlowDirections {
 type Flow = {a: number, b: number, c: number, sum: number};
 type Flows = Map<Direction, Flow>;
 
-type LPModel = {
-    optimize: any,
-    opType: any,
-    variables: {[x :string]: {[x: string]: number}},
-    constraints: { [x: string]:
-        {max?: number, min?: number, equal?: number}
-    },
-};
-
-function lpsolve(model: LPModel): { [s: string]: any; } {
-    // @ts-ignore
-    return solver.solve(model);
-}
-
 function find_flows(region: UncutRegion, flow_directions: FlowDirections): Flows {
     let {sector_start, sector_end, vectors} = flow_directions;
     var model: LPModel = {
-        optimize: "nothing",
+        optimize: "choice",
         opType: "max",
         constraints: {},
         variables: {},
@@ -134,41 +127,49 @@ function find_flows(region: UncutRegion, flow_directions: FlowDirections): Flows
             var_c = var_base + "_c",
             var_len = var_base + "_len";
         model.variables[var_a] = {
+            choice: PRNG.choose_weight(),
             constr_a_x: direction.x,
             constr_a_y: direction.y,
             [var_len]: 1,
         };
         model.variables[var_b] = {
+            choice: PRNG.choose_weight(),
             constr_b_x: direction.x,
             constr_b_y: direction.y,
             [var_len]: 1,
         };
         model.variables[var_c] = {
+            choice: PRNG.choose_weight(),
             constr_c_x: direction.x,
             constr_c_y: direction.y,
             [var_len]: 1,
         };
         model.constraints[var_len] = {
-            equal: 1,
+            equal: Math.abs(vector.value),
         };
         flow_params[i] = {k, var_a, var_b, var_c};
     }
     let
         {x: constr_a_x, y: constr_a_y} = Vector.from_points(
-            flow_directions.sector_start, region.point1 ),
+            sector_start, region.point1 ),
         {x: constr_b_x, y: constr_b_y} = Vector.from_points(
             region.point1, region.point2 ),
         {x: constr_c_x, y: constr_c_y} = Vector.from_points(
-            region.point2, flow_directions.sector_end );
+            region.point2, sector_end );
     Object.assign(model.constraints, {
-        constr_a_x, constr_a_y,
-        constr_b_x, constr_b_y,
-        constr_c_x, constr_c_y,
+        constr_a_x: {equal: constr_a_x},
+        constr_a_y: {equal: constr_a_y},
+        constr_b_x: {equal: constr_b_x},
+        constr_b_y: {equal: constr_b_y},
+        constr_c_x: {equal: constr_c_x},
+        constr_c_y: {equal: constr_c_y},
     });
 
     var results = lpsolve(model);
     if (!results.feasible) {
-        throw new ImpossibleConstructError("Cannot find flow");
+        let error: any = new ImpossibleConstructError("Cannot find flow");
+        error.info = {find_flows: {model, results}};
+        throw error;
     }
     var flows: Flows = new Map();
     for (let [i, vector] of vectors.entries()) {
@@ -177,13 +178,7 @@ function find_flows(region: UncutRegion, flow_directions: FlowDirections): Flows
             a: number,
             b: number,
             c: number;
-        ({[var_a]: a, [var_b]: b, [var_c]: c} = results);
-        if (
-            !(typeof a !== "number") || !(typeof b !== "number") ||
-            !(typeof c !== "number")
-        ) {
-            throw new Error("Solver did not return value");
-        }
+        ({[var_a]: a = 0, [var_b]: b = 0, [var_c]: c = 0} = results);
         flows.set( vector.direction,
             {a: a*k, b: b*k, c: c*k, sum: (a+b+c)*k} );
     }
@@ -196,13 +191,25 @@ function construct_cut_region(uncut_region: UncutRegion, flows: Flows) {
         uncut_region.triangle1.oriented_edges()
     ).map(({vector}) => vector);
     let region = CutRegion.initial(origin, [vec1, vec2, vec3]);
-    var sector_start = origin, sector_end = origin;
-    for (let [direction, flow] of flows) {
-        ({region, sector_start, sector_end} =
-            Incutter.incut(
-                region, sector_start, sector_end,
-                direction, flow,
-            ));
+    var
+        sector_start = origin,
+        sector_end = region.triangle2.vertices[0];
+    // XXX debug
+    var region_history: any[] = [];
+    for (let [direction, flow] of PRNG.choose_order(Array.from(flows))) {
+        region_history.push({region, sector_start, sector_end});
+        try {
+            ({region, sector_start, sector_end} =
+                Incutter.incut(
+                    region, sector_start, sector_end,
+                    direction, flow,
+                ));
+        } catch (error: any) {
+            error.info = Object.assign({construct_cut_region: {
+                region_history,
+            }}, error.info);
+            throw error
+        }
     }
     return region;
 }
@@ -297,7 +304,7 @@ class Incutter {
         ({
             forward: { vertex: this.start, index: start_index },
             backward: { vertex: this.end, index: end_index },
-        } = this.polygon.find_tangent_point(direction));
+        } = this.polygon.find_tangent_points(direction));
         this.upper_border_edges = 
             this.polygon.slice_edges(start_index, end_index)
                 .filter(edge => edge.direction !== this.direction );
@@ -494,6 +501,7 @@ class Incutter {
                 v_edge_map.push([ height,
                     new_edges.slice_values(projection, next_projection) ]);
             }
+            v_edge_map.add_guard(v_projections[v_projections.length-1][0]);
             this.new_edge_map.set(vertex, v_edge_map);
         }
 
@@ -503,11 +511,11 @@ class Incutter {
             let [start_images, end_images] = [edge.start, edge.end]
                 .map((vertex) => get_or_die(this.vertex_image_map, vertex));
             for (let height of heights) {
-                let [start_index, end_index] = [start_images, end_images]
+                let [start_proj, end_proj] = [start_images, end_images]
                     .map((image_map) => image_map.get(height))
-                    .map((image) => projection_images.index_of_value(image));
+                    .map((image) => projection_images.find_value(image).key);
                 edge_images.set(height,
-                    new_edges.slice_values(start_index, end_index) );
+                    new_edges.slice_values(start_proj, end_proj) );
             }
             this.edge_image_map.set(edge, edge_images);
         }
@@ -623,6 +631,8 @@ class Incutter {
                 Edge | Array<Edge>,
         ): Generator<Edge, void, undefined> {
             let prev_vector: DirectedVector | null = null;
+            // XXX debug
+            let image_distances = new Array<any>();
             for ( let {edge, index, forward, vector}
                 of polygon.oriented_edges() )
             {
@@ -632,7 +642,7 @@ class Incutter {
                 if (prev_vector === null) {
                     let prev_edge = polygon.get_edge(index-1);
                     prev_vector = prev_edge.delta_from(
-                        prev_edge.other_end(end) );
+                        prev_edge.other_end(start) );
                 }
                 let
                     direction_type = get_direction_type(vector),
@@ -650,7 +660,19 @@ class Incutter {
                         edge_height = min;
                         start_height = max;
                     }
-                    yield* start_image;
+                    for (let e of start_image) {
+                        try {
+                            image_distances.push([
+                                Vector.from_points(start, e.start).length,
+                                Vector.from_points(start, e.end).length ]);
+                            yield e;
+                        } catch (error: any) {
+                            error.info = Object.assign(
+                                {edge_generator: {case: 1, edge: e}},
+                                error.info );
+                            throw error;
+                        }
+                    }
                 } else {
                     if (direction_type == 1) {
                         edge_height = start_height = "max";
@@ -662,32 +684,54 @@ class Incutter {
                     start_preimage = [start, start_height];
                 let edge_image = edge_map(edge, edge_height);
                 if (edge_image instanceof Edge) {
-                    yield edge_image;
+                    try {
+                        image_distances.push(
+                            Vector.from_points(edge.start, edge_image.start).length );
+                        yield edge_image;
+                    } catch (error: any) {
+                        error.info = Object.assign(
+                            {edge_generator: { case: 2,
+                                edge, edge_image, edge_height, start_height,
+                                image_distances
+                            }},
+                            error.info );
+                        throw error;
+                    }
                 } else {
-                    if (!forward)
-                        edge_image = Array.from(edge_image).reverse()
-                    yield* edge_image;
+                    if (!forward) {
+                        edge_image = Array.from(edge_image).reverse();
+                    }
+                    for (let e of edge_image) {
+                        try {
+                            image_distances.push(
+                                Vector.from_points(edge.start, e.start).length );
+                            yield e;
+                        } catch (error) {
+                            throw error;
+                        }
+                    }
                 }
                 prev_vector = vector;
             }
         }
-        let edges = Array.from(edge_generator(
+        // XXX debug
+        let edges = Array.from(Edge.debug_edge_generation(edge_generator(
             this.polygon,
             (vertex) => {
                 let heights = get_or_die(this.vertex_height_map, vertex);
                 return {
                     edges: get_or_die(this.new_edge_map, vertex)
-                        .slice_values(heights.min(), heights.min()),
+                        .slice_values(heights.min(), heights.max()),
                     min: heights.min(),
                     max: heights.max(),
                 };
             },
             (edge, height) => get_or_die(this.edge_image_map, edge)
                 .get(numeric_height(height)),
-        ));
+        )));
         if (start_preimage === undefined)
             throw new Error("Unreachable");
-        let [start, height] = start_preimage
+        let [start, height] = start_preimage;
         return new Polygon(
             get_or_die(this.vertex_image_map, start)
                 .get(numeric_height(height)),
@@ -744,7 +788,7 @@ class HeightedFaceGraph extends PlanarGraph {
     }
     set_face_height(face: Polygon, h: number) {
         let height = this.get_face_height(face);
-        if (height.height !== null) {
+        if (height.height !== undefined) {
             throw new Error("Height already set");
         }
         if (h < height.min - EPSILON || h > height.max + EPSILON) {
@@ -867,8 +911,17 @@ class PRNG {
     //         ranges.push([numbers[i-1], numbers[i]]);
     //     }
     // }
+    static choose_weight(): number {
+        return Math.random();
+    }
     static choose_element<T>(elements: Array<T>): T {
         return elements[PRNG.choose_index(elements.length)];
+    }
+    static *choose_order<T>(elements: Array<T>): Generator<T,void,undefined> {
+        while (elements.length > 0) {
+            let index = PRNG.choose_index(elements.length);
+            yield* elements.splice(index, 1);
+        }
     }
     static choose_face(faces: Array<Polygon>): Polygon {
         return PRNG.choose_element(faces);

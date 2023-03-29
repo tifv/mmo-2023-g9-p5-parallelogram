@@ -5,11 +5,44 @@
         </style>
     </head>
     <body>
-
+        <svg id="canvas">
+            <style>
+                :is(path), :is(circle) {
+                    --main-color: black;
+                }
+                path {
+                    stroke: var(--main-color);
+                    fill: none;
+                    stroke-linejoin: round;
+                }
+                circle.dot {
+                    stroke: var(--main-color);
+                }
+                path.polygon {
+                    stroke-width: 1px;
+                    fill: none;
+                }
+                path.edge {
+                    stroke-width: 0.5px;
+                    stroke-linecap: round;
+                }
+                path.face {
+                    stroke: none;
+                    fill: blue;
+                    fill-opacity: 0.3;
+                }
+                .start_obj {
+                    --main-color: green;
+                }
+                .end_obj {
+                    --main-color: red;
+                }
+            </style>
+        </svg>
     </body>
-<script src="https://unpkg.com/javascript-lp-solver/prod/solver.js"></script>
-<script src="./common.js"></script>
-<script src="./graph.js"></script>
-<script src="./parallelogram.js"></script>
-<script src="./main.js"></script>
+<script src="./lib/solver.js"></script>
+<script src="./build/common.js"></script>
+<script src="./build/graph.js"></script>
+<script src="./build/parallelogram.js"></script>
+<script src="./build/main.js"></script>
 </html>

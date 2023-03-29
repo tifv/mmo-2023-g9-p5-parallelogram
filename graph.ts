@@ -71,6 +71,9 @@ class DirectedVector extends Vector {
 }
 
 class Point extends Pair {
+    // XXX debug
+    id: string = crypto.randomUUID();
+
     shift(vector: Vector): Point {
         return new Point(this.x + vector.x, this.y + vector.y);
     }
@@ -86,6 +89,9 @@ class Edge {
     delta: DirectedVector;
     end: Point;
 
+    // XXX debug
+    id: string = crypto.randomUUID();
+
     constructor(start: Point, delta: DirectedVector, end: Point) {
         if (delta.value < 0)
             [start, delta, end] = [end, delta.opposite(), start];
@@ -100,6 +106,9 @@ class Edge {
     }
     incident_to(vertex: Point) {
         return vertex === this.start || vertex === this.end;
+    }
+    adjacent_to(edge: Edge) {
+        return this.incident_to(edge.start) || this.incident_to(edge.end);
     }
 
     get direction(): Direction {
@@ -169,6 +178,22 @@ class Edge {
             return this;
         return new Edge(start, this.delta, end);
     }
+
+    static *debug_edge_generation(edges: Generator<Edge,void,undefined>):
+        Generator<Edge,void,undefined>
+    {
+        let previous_edge: Edge | null = null;
+        for (let edge of edges) {
+            if (previous_edge !== null && !edge.adjacent_to(previous_edge)) {
+                let error: any = new Error("Emitted edges are not adjacent");
+                error.info = {debug_edge_generation: {edge, previous_edge}};
+                edges.throw(error);
+                throw error;
+            }
+            previous_edge = edge;
+            yield edge;
+        }
+    }
 }
 
 type OrientedEdge = {
@@ -189,13 +214,18 @@ class Polygon {
             return;
         }
 
-        let vertex = start;
-        for (let edge of this.edges) {
-            this.vertices.push(vertex);
-            vertex = edge.other_end(vertex);
+        try {
+            let vertex = start;
+            for (let edge of this.edges) {
+                this.vertices.push(vertex);
+                vertex = edge.other_end(vertex);
+            }
+            if (vertex !== start)
+                throw new Error("Polygon is not cyclic");
+        } catch (error: any) {
+            error.info = Object.assign({Polygon: {start, edges}}, error.info);
+            throw error;
         }
-        if (vertex !== start)
-            throw new Error("Polygon is not cyclic");
     }
     /** This is the only modifying operation on Polygon.
      * It only affects iteration order of its edges. */
@@ -220,8 +250,7 @@ class Polygon {
         }
     }
     _index_modulo(index: number): number {
-        var n = this.edges.length;
-        return ((index % n) + n) % n;
+        return modulo(index, this.edges.length);
     }
     get_edge(index: number): Edge {
         index = this._index_modulo(index);
@@ -287,8 +316,7 @@ class Polygon {
             Array.from(new_edges(this.oriented_edges())) );
     }
 
-
-    find_tangent_point(vector: AbstractVector): {
+    find_tangent_points(direction: AbstractVector): {
         forward: { vertex: Point; index: number; };
         backward: { vertex: Point; index: number; };
     } {
@@ -299,25 +327,31 @@ class Polygon {
                 backward: {vertex: vertex, index: 0},
             };
         }
-        var lefts = this.edges.map( edge =>
-            epsilon_sign(edge.delta.skew(vector)) );
+        var lefts = Array.from(itermap(this.oriented_edges(), ({vector}) =>
+            epsilon_sign(vector.skew(direction)) ));
         let
             forward_indices: Array<number> = [],
             backward_indices: Array<number> = [];
         for (let i = 0; i < this.edges.length; ++i) {
-            if ( lefts[this._index_modulo(i-1)] <= 0 &&
-                lefts[this._index_modulo(i)] > 0 )
-            {
+            let
+                prev_left = lefts[this._index_modulo(i-1)],
+                next_left = lefts[this._index_modulo(i)]
+            if (prev_left <= 0 && next_left > 0) {
                 forward_indices.push(i);
             }
-            if ( lefts[this._index_modulo(i-1)] >= 0 &&
-                lefts[this._index_modulo(i)] < 0 )
+            if (prev_left >= 0 && next_left < 0)
             {
                 backward_indices.push(i);
             }
         }
         if (forward_indices.length < 1 || backward_indices.length < 1 ) {
-            throw new Error("Couldn't find a tangent");
+            let error: any = new Error("Couldn't find a tangent");
+            error.info = {find_tangent_points: {
+                lefts, forward_indices, backward_indices,
+                skews: itermap(this.oriented_edges(), ({vector}) =>
+                    epsilon_sign(vector.skew(direction)) ),
+            }};
+            throw error;
         }
         if (forward_indices.length > 1 || backward_indices.length > 1) {
             throw new Error("Found multiple tangents somehow");
@@ -394,9 +428,16 @@ class PlanarGraph {
     ) {
         this.vertices = new Set(vertices);
         this.edges = new Set(edges);
-        this.edgemap = PlanarGraph._build_edgemap(this.edges);
         this.faces = new Set(faces);
-        this.facemap = PlanarGraph._build_facemap(this.faces);
+        try {
+            this.edgemap = PlanarGraph._build_edgemap(this.edges);
+            this.facemap = PlanarGraph._build_facemap(this.faces);
+        } catch (error: any) {
+            error.info = Object.assign({PlanarGraph: {
+                graph: this,
+            }}, error.info);
+            throw error;
+        }
     }
     static _build_edgemap(edges: Iterable<Edge>): Map<Point,EdgeSet> {
         let edgemap: Map<Point,EdgeSet> = new Map();
@@ -427,25 +468,26 @@ class PlanarGraph {
                     faceset = [null, null];
                     facemap.set(edge, faceset);
                 }
-                if (forward) {
-                    if (faceset[0] !== null)
-                        throw new Error(
-                            "Face with forward direction is already present" );
-                    faceset[0] = face;
-                } else {
-                    if (faceset[1] !== null)
-                        throw new Error(
-                            "Face with inverse direction is already present" );
-                    faceset[1] = face;
+                let index = forward ? 0 : 1;
+                if (faceset[index] !== null) {
+                    let error: any = new Error(
+                        "Face with the same direction is already present" );
+                    error.info = {build_facemap:
+                        {edge, face, faceset} };
+                    throw error;
                 }
+                faceset[index] = face;
             }
         }
         return facemap;
     }
     edge_faces(edge: Edge): FaceSet {
         let faceset = this.facemap.get(edge);
-        if (faceset === undefined)
-            throw new Error("PlanarGraph data structure is compromised");
+        if (faceset === undefined) {
+            let error: any = new Error("PlanarGraph data structure is compromised");
+            error.info = {edge_faces: {edge, graph: this}}
+            throw error;
+        }
         return faceset;
     }
     copy(): PlanarGraph {
