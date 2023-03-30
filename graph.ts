@@ -350,7 +350,7 @@ class Polygon {
                     yield replacement;
                     continue;
                 }
-                if (forward) {
+                if (!forward) {
                     replacement = Array.from(replacement).reverse();
                 }
                 yield* replacement;
@@ -472,6 +472,12 @@ class Polygon {
         };
     }
 
+}
+
+type GraphLike = {
+    vertices: Iterable<Point>,
+    edges: Iterable<Edge>,
+    faces: Iterable<Polygon>,
 }
 
 type EdgeSet = Array<Edge>;

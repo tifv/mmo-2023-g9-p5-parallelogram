@@ -1,75 +1,81 @@
 <html>
     <head>
-        <style>
-
-        </style>
+<style>
+    body {
+        text-align: center;
+    }
+</style>
     </head>
     <body>
         <svg
             xmlns="http://www.w3.org/2000/svg"
-            width="800px" height="800px"
             id="canvas"
         >
-            <style>
-                :is(path), :is(circle) {
-                    --main-stroke-color: black;
-                    --main-fill-color: blue;
-                }
-                path {
-                    stroke: var(--main-stroke-color);
-                    fill: none;
-                    stroke-linejoin: round;
-                }
-                circle.dot {
-                    stroke: var(--main-stroke-color);
-                }
-                .polygon {
-                    stroke-width: 1px;
-                    fill: none;
-                }
-                .edge {
-                    stroke: var(--main-stroke-color);
-                    stroke-width: 0.5px;
-                    stroke-linecap: round;
-                }
-                .face {
-                    stroke: none;
-                    fill: var(--main-fill-color);
-                    fill-opacity: 0.3;
-                }
-                .face.face__border {
-                    stroke: var(--main-stroke-color);
-                    stroke-width: 0.75px;
-                }
-                .face.face__outer {
-                    fill: none;
-                }
-                .unknown_height {
-                    --main-stroke-color: red;
-                    --main-fill-color: red;
-                }
-                .edge__vertical {
-                    --main-stroke-color: gray;
-                }
-                .start_obj {
-                    --main-stroke-color: darkgreen;
-                    --main-fill-color: green;
-                }
-                .end_obj {
-                    --main-stroke-color: darkblue;
-                    --main-fill-color: blue;
-                }
-                .error_obj {
-                    --main-stroke-color: red;
-                    --main-fill-color: red;
-                }
-            </style>
+<style>
+    svg {
+        width: clamp(100px, min(80vw, 80vh), 1000px);
+        aspect-ratio: 1 / 1;
+        cursor: pointer;
+    }
+    :is(path), :is(circle) {
+        --main-stroke-color: black;
+        --main-fill-color: blue;
+    }
+    path {
+        stroke: var(--main-stroke-color);
+        fill: none;
+        stroke-linejoin: round;
+    }
+    circle.dot {
+        stroke: var(--main-stroke-color);
+    }
+    .polygon {
+        stroke-width: 1px;
+        fill: none;
+    }
+    .edge {
+        stroke: var(--main-stroke-color);
+        stroke-width: 0.5px;
+        stroke-linecap: round;
+    }
+    .face {
+        stroke: none;
+        fill: var(--main-fill-color);
+        fill-opacity: 0.3;
+    }
+    .face.face__border {
+        stroke: var(--main-stroke-color);
+        stroke-width: 0.75px;
+    }
+    .face.face__outer {
+        fill: none;
+    }
+    .unknown_height {
+        --main-stroke-color: red;
+        --main-fill-color: red;
+    }
+    .edge__vertical {
+        --main-stroke-color: gray;
+    }
+    .start_obj {
+        --main-stroke-color: darkgreen;
+        --main-fill-color: green;
+    }
+    .end_obj {
+        --main-stroke-color: darkblue;
+        --main-fill-color: blue;
+    }
+    .error_obj {
+        --main-stroke-color: red;
+        --main-fill-color: red;
+    }
+</style>
         </svg>
     </body>
-<script src="./lib/solver.js"></script>
-<script src="./build/common.js"></script>
-<script src="./build/graph.js"></script>
-<script src="./build/chooser.js"></script>
-<script src="./build/parallelogram.js"></script>
-<script src="./build/main.js"></script>
+<script src="https://unpkg.com/javascript-lp-solver/prod/solver.js"></script>
+<script src="./common.js"></script>
+<script src="./graph.js"></script>
+<script src="./chooser.js"></script>
+<script src="./parallelogram.js"></script>
+<script src="./main.js"></script>
 </html>

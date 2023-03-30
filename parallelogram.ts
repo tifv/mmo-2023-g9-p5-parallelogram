@@ -285,22 +285,24 @@ class Incutter {
         heighted_graph.check();
         incutter.determine_edge_heights(heighted_graph);
         incutter.determine_vertex_heights();
-        incutter.group_vertices();
 
-        incutter.generate_vertex_images();
-        incutter.generate_edge_images();
-        incutter.generate_face_images(heighted_graph);
-        let new_polygon = incutter.regenerate_polygon();
-        let new_outer_face = new_polygon.reversed();
+        let new_outer_face: Polygon;
         let new_graph: PlanarGraph;
         try {
+            incutter.group_vertices();
+            incutter.generate_vertex_images();
+            incutter.generate_edge_images();
+            incutter.generate_face_images(heighted_graph);
+            new_outer_face = incutter.regenerate_polygon().reversed();
             new_graph = new PlanarGraph(
                 [...incutter.all_new_vertices()],
                 [...incutter.all_new_edges()],
                 [...incutter.all_new_faces(), new_outer_face],
             );
         } catch (error: any) {
-            error.info = Object.assign({incut: {heighted_graph}}, error.info);
+            error.info = Object.assign({incut: {
+                heighted_graph, incutter,
+            }}, error.info);
             throw error;
         }
         return {

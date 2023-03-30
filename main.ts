@@ -4,7 +4,11 @@ const POLYGON_SIZE = Object.freeze({
 
 const SVGNS = "http://www.w3.org/2000/svg";
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function meta_main() {
+    main();
+});
+
+function main() {
     const {M, r} = POLYGON_SIZE;
     let canvas_svg = document.getElementById('canvas');
     if (canvas_svg === null || ! (canvas_svg instanceof SVGSVGElement))
@@ -14,7 +18,47 @@ document.addEventListener('DOMContentLoaded', function() {
         canvas.svg.setAttribute( 'viewBox',
         [-1.2*r, -1.2*r, 2.4*r, 2.4*r].join(" ") );
     };
-    set_canvas_viewBox()
+    set_canvas_viewBox();
+    let {polygon, directions, side_length: a} = Polygon.make_regular_even(
+        new Point(0, 0), M, r );
+    let dir1 = directions[1], dir3 = directions[M-1];
+    let vec1 = new DirectedVector(dir1, 0.3*a);
+    let vec3 = new DirectedVector(dir3, -0.6*a);
+    let vec2 = DirectedVector.make_direction(
+        vec1.opposite().add(vec3.opposite()))
+    let triangle1 = Polygon.from_vectors( new Point(-0.5*a, -a),
+        [vec1, vec2, vec3] );
+    let triangle2 = Polygon.from_vectors( new Point(0, +a),
+        [vec1.opposite(), vec2.opposite(), vec3.opposite()] )
+    let uncut_region = new UncutRegion(polygon, triangle1, triangle2);
+    let flow_directions = select_flowing_sector(uncut_region);
+
+    let reload = () => {
+        let elements = Array.from(canvas.svg.children).filter(
+            element => (['path', 'circle'].indexOf(element.tagName) >= 0) )
+        for (let element of elements) {
+            canvas.svg.removeChild(element);
+        }
+        let flows = find_flows(uncut_region, flow_directions);
+        let cut_region = construct_cut_region(uncut_region, flows);
+        canvas.draw_cut_region(cut_region);
+    }
+    canvas.svg.addEventListener('click', reload);
+    reload();
+};
+
+
+function main_debug() {
+    const {M, r} = POLYGON_SIZE;
+    let canvas_svg = document.getElementById('canvas');
+    if (canvas_svg === null || ! (canvas_svg instanceof SVGSVGElement))
+        throw new Error();
+    let canvas = new Canvas(canvas_svg);
+    let set_canvas_viewBox = () => {
+        canvas.svg.setAttribute( 'viewBox',
+        [-1.2*r, -1.2*r, 2.4*r, 2.4*r].join(" ") );
+    };
+    set_canvas_viewBox();
     let new_canvas = () => {
         canvas = new Canvas();
         document.body.appendChild(canvas.svg);
@@ -22,31 +66,37 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     try {
-        main(canvas);
+        main_debug_try(canvas);
     } catch (error: any) {
         console.log(error);
         console.log(error.info);
-        let uncut_region = error?.info?.find_flows?.uncut_region;
+        let uncut_region = <UncutRegion | null>(
+            error?.info?.find_flows?.uncut_region );
         if (uncut_region != null) {
             console.log("drawing uncut region")
             canvas.draw_uncut_region(uncut_region);
             new_canvas();
         }
-        let failed_graph_info = error?.info?.PlanarGraph;
+        let failed_graph_info = <{graph: PlanarGraph} | null>(
+            error?.info?.PlanarGraph );
         if (failed_graph_info?.graph != null) {
             console.log("drawing graph that failed to construct")
             canvas.draw_graph(failed_graph_info.graph);
             new_canvas();
         }
-        let bad_graph_info = error?.info?.Graph_check;
+        let bad_graph_info = <{
+            graph: PlanarGraph | null,
+            edges_without_faces?: {all? : Edge[]},
+            faces_with_rogue_edges?: Map<Polygon,Edge[]>,
+        } | null>(error?.info?.Graph_check);
         if (bad_graph_info?.graph != null) {
             console.log("drawing graph that failed checks")
             let mask = new Set<Polygon|Edge>();
-            for (let edge of <Edge[]>bad_graph_info?.edges_without_faces?.all || []) {
+            for (let edge of bad_graph_info?.edges_without_faces?.all || []) {
                 canvas.draw_edge(edge, {classes: ["edge", "error_obj"]});
                 mask.add(edge);
             }
-            for ( let [face] of <Iterable<[Polygon,Edge[]]>>
+            for ( let [face] of
                 bad_graph_info?.faces_with_rogue_edges || [] )
             {
                 canvas.draw_polygon(face, {classes: ["face", "error_obj"]});
@@ -55,7 +105,8 @@ document.addEventListener('DOMContentLoaded', function() {
             canvas.draw_graph(bad_graph_info.graph, mask);
             new_canvas();
         }
-        let bad_edge_info = error?.info?.PLanarGraph_edge_faces;
+        let bad_edge_info = <{graph: PlanarGraph, edge: Edge}>(
+            error?.info?.PLanarGraph_edge_faces );
         if (bad_edge_info?.graph != null) {
             console.log("drawing graph with a bad edge")
             let edge = bad_edge_info.edge;
@@ -65,13 +116,23 @@ document.addEventListener('DOMContentLoaded', function() {
                     style: {stroke: "cyan", strokeWidth: '0.75px'}} );
             new_canvas();
         }
-        let bad_heighted_graph =
+        let bad_heighted_graph = <HeightedFaceGraph | null>(
             error?.info?.inordered_heights?.graph ||
             error?.info?.incut?.heighted_graph ||
-            error?.info?.HeightedGraph_check?.graph;
+            error?.info?.HeightedGraph_check?.graph );
         if (bad_heighted_graph != null) {
             console.log("drawing graph with (maybe) incorrectly ordered heights")
             canvas.draw_heighted_graph(bad_heighted_graph);
+            new_canvas();
+        }
+        let incutter = <Incutter|null>(error?.info?.incut?.incutter);
+        if (incutter != null) {
+            console.log("drawing whatever edges and faces were generated")
+            canvas.draw_graph({
+                vertices: [...incutter.all_new_vertices()],
+                edges: [...incutter.all_new_edges()],
+                faces: [...incutter.all_new_faces()],
+            });
             new_canvas();
         }
         let region_history = error?.info?.construct_cut_region?.region_history;
@@ -88,9 +149,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         throw error;
     }
-});
+};
 
-function main(canvas: Canvas) {
+function main_debug_try(canvas: Canvas) {
     const {M, r} = POLYGON_SIZE;
     // const a = r * 2 * Math.sin(Math.PI/(2*M));
     let {polygon, directions, side_length: a} = Polygon.make_regular_even(
@@ -123,7 +184,7 @@ class Canvas {
         if (svg === null)
             svg = makesvg('svg', {attributes: {
                 xmlns: SVGNS,
-                width: "500px", height: "500px",
+                width: "800px", height: "800px",
             }});
         this.svg = svg;
     }
@@ -200,7 +261,7 @@ class Canvas {
         }
     }
     draw_graph(
-        graph: PlanarGraph,
+        graph: GraphLike,
         mask: Set<Edge|Polygon> | null = null,
     ) {
         for (let face of graph.faces) {
@@ -212,7 +273,8 @@ class Canvas {
         for (let edge of graph.edges) {
             if (mask !== null && mask.has(edge))
                 continue;
-            this.draw_edge(edge, {classes: ["edge"]});
+            let element = this.draw_edge(edge, {classes: ["edge"]});
+            element.onclick = () => {console.log(edge);};
         }
     }
     draw_heighted_graph(
