@@ -1,3 +1,7 @@
+const POLYGON_SIZE = Object.freeze({
+    M: 7, a: 30,
+});
+
 document.addEventListener('DOMContentLoaded', function() {
     let canvas_svg = document.getElementById('canvas');
     if (canvas_svg === null || ! (canvas_svg instanceof SVGSVGElement))
@@ -22,11 +26,30 @@ document.addEventListener('DOMContentLoaded', function() {
             canvas.draw_graph(bad_graph);
             new_canvas();
         }
+        let failed_graph = error?.info?.Graph_check?.graph;
+        if (failed_graph != null) {
+            console.log("drawing graph with a bad construction")
+            let error_data = error.info.Graph_check
+            let mask = new Set<Polygon|Edge>();
+            for (let edge of <Edge[]>error_data?.edges_without_faces.all || []) {
+                canvas.draw_edge(edge, {classes: ["edge", "error_obj"]});
+                mask.add(edge);
+            }
+            for ( let [face] of <Iterable<[Polygon,Edge[]]>>
+                error_data?.faces_with_rogue_edges || [] )
+            {
+                canvas.draw_polygon(face, {classes: ["face", "error_obj"]});
+                mask.add(face);
+            }
+            canvas.draw_graph(failed_graph, mask);
+            new_canvas();
+        }
         let bad_edge_graph = error?.info?.edge_faces?.graph;
         if (bad_edge_graph != null) {
             console.log("drawing graph with a bad edge")
-            canvas.draw_graph(bad_edge_graph);
-            canvas.draw_edge(error.info.edge_faces.edge,
+            let edge = error.info.edge_faces.edge;
+            canvas.draw_graph(bad_edge_graph, new Set([edge]));
+            canvas.draw_edge( edge,
                 {classes: ["edge"],
                     style: {stroke: "cyan", strokeWidth: '0.75px'}} );
             new_canvas();
@@ -35,7 +58,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (region_history != null) {
             console.log("drawing successful regions")
             for (let {region, sector_start, sector_end}
-                of region_history.reverse() )
+                of Array.from<any>(region_history).reverse() )
             {
                 canvas.draw_cut_region(region);
                 canvas.mark_dot(sector_start, {classes: ["start_obj"]});
@@ -48,7 +71,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function main(canvas: Canvas) {
-    const M = 7, a = 30;
+    const {M, a} = POLYGON_SIZE;
     let {polygon, directions} = Polygon.make_regular(M, a);
     let dir1 = directions[1], dir3 = directions[M-1];
     let vec1 = new DirectedVector(dir1, 0.3*a);
@@ -90,6 +113,7 @@ class Canvas {
                     "M", edge.start.x, edge.start.y,
                     "L", edge.end.x, edge.end.y,
                 ].join(" "),
+                id: edge.id,
             },
             classes: options?.classes,
             style: options?.style,
@@ -141,12 +165,19 @@ class Canvas {
             this.draw_edge(edge, {classes: ["edge"]});
         }
     }
-    draw_graph(graph: PlanarGraph) {
+    draw_graph(
+        graph: PlanarGraph,
+        mask: Set<Edge|Polygon> | null = null,
+    ) {
         for (let face of graph.faces) {
+            if (mask !== null && mask.has(face))
+                continue;
             let element = this.draw_polygon(face, {classes: ["face"]});
             element.onclick = () => {console.log(face);};
         }
         for (let edge of graph.edges) {
+            if (mask !== null && mask.has(edge))
+                continue;
             this.draw_edge(edge, {classes: ["edge"]});
         }
     }

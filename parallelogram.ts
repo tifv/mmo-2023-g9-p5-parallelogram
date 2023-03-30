@@ -127,19 +127,19 @@ function find_flows(region: UncutRegion, flow_directions: FlowDirections): Flows
             var_c = var_base + "_c",
             var_len = var_base + "_len";
         model.variables[var_a] = {
-            choice: PRNG.choose_weight(),
+            choice: Chooser.choose_weight(),
             constr_a_x: direction.x,
             constr_a_y: direction.y,
             [var_len]: 1,
         };
         model.variables[var_b] = {
-            choice: PRNG.choose_weight(),
+            choice: Chooser.choose_weight(),
             constr_b_x: direction.x,
             constr_b_y: direction.y,
             [var_len]: 1,
         };
         model.variables[var_c] = {
-            choice: PRNG.choose_weight(),
+            choice: Chooser.choose_weight(),
             constr_c_x: direction.x,
             constr_c_y: direction.y,
             [var_len]: 1,
@@ -196,14 +196,23 @@ function construct_cut_region(uncut_region: UncutRegion, flows: Flows) {
         sector_end = region.triangle2.vertices[0];
     // XXX debug
     var region_history: any[] = [];
-    for (let [direction, flow] of PRNG.choose_order(Array.from(flows))) {
-        region_history.push({region, sector_start, sector_end});
+    region_history.push({region, sector_start, sector_end});
+    for (let [direction, flow] of Chooser.choose_order(Array.from(flows))) {
         try {
+
+            // XXX debug
+            region.graph.edges.forEach((edge) => {
+                if (edge.id.generation !== undefined)
+                    edge.id.generation = region_history.length;
+            });
+
             ({region, sector_start, sector_end} =
                 Incutter.incut(
                     region, sector_start, sector_end,
                     direction, flow,
                 ));
+            region_history.push({region, sector_start, sector_end});
+            region.graph.check();
         } catch (error: any) {
             error.info = Object.assign({construct_cut_region: {
                 region_history,
@@ -259,7 +268,6 @@ class Incutter {
         let heighted_graph = incutter.build_heighted_graph(max_height);
         heighted_graph.set_face_height(region.triangle1, height1);
         heighted_graph.set_face_height(region.triangle2, height2);
-        heighted_graph.resolve_iffy_heights();
         incutter.determine_face_heights(heighted_graph, heights);
         incutter.determine_edge_heights(heighted_graph);
         incutter.determine_vertex_heights();
@@ -273,9 +281,9 @@ class Incutter {
         return {
             region: new CutRegion(
                 new PlanarGraph(
-                    Array.from(incutter.all_new_vertices()),
-                    Array.from(incutter.all_new_edges()),
-                    Array.from(incutter.all_new_faces()),
+                    [...incutter.all_new_vertices()],
+                    [...incutter.all_new_edges()],
+                    [...incutter.all_new_faces(), new_outer_face],
                 ),
                 new_outer_face,
                 get_or_die(incutter.face_image_map, region.triangle1),
@@ -363,6 +371,7 @@ class Incutter {
         heights: number[],
     ) {
         while (true) {
+            heighted_graph.resolve_iffy_heights();
             let floating_faces = new Array<Polygon>();
             for (let [face, height] of heighted_graph.face_heights) {
                 if (height.height === undefined)
@@ -371,11 +380,11 @@ class Incutter {
             if (floating_faces.length == 0)
                 break;
             let
-                floating_face = PRNG.choose_face(floating_faces),
+                floating_face = Chooser.choose_face(floating_faces),
                 height = heighted_graph.get_face_height(floating_face);
             // XXX set any possible intermediate heights, not just min and max
             heighted_graph.set_face_height( floating_face,
-                PRNG.choose_element([height.min, height.max]) );
+                Chooser.choose_element([height.min, height.max]) );
         }
         /**
          * XXX TODO add any underused intermediate heights to vertices
@@ -397,6 +406,22 @@ class Incutter {
                 edge_heights.add(face_height);
             }
             this.edge_height_map.set(edge, edge_heights);
+            // XXX debug
+            if (edge.direction !== this.direction) {
+                let {below: below_face, above: above_face}
+                    = heighted_graph.relative_edge_faces(edge);
+                let [below_height, above_height] = [below_face, above_face]
+                    .map( face => (face == null)
+                        ? null : heighted_graph.get_face_height(face).height );
+                if ( below_height != null && above_height != null &&
+                    below_height > above_height )
+                {
+                    let error: any = new Error("Face heights are not ordered");
+                    error.info = {determine_edge_heights: {
+                        below_face, above_face, edge,
+                    }}
+                }
+            }
         }
         for (let edge of this.lower_border_edges) {
             get_or_die(this.edge_height_map, edge).add(0);
@@ -479,29 +504,46 @@ class Incutter {
         }
 
         let new_edges = new SlicedArray<Edge>();
+        new_edges.insert_guard(projection_images.min_key());
         for (let i = 1; i < projection_images.length; ++i) {
             let
-                [start_projection, start] = projection_images[i-1],
-                [,end] = projection_images[i];
-            new_edges.push([start_projection, [new Edge(
+                [start_proj, start] = projection_images[i-1],
+                [end_proj, end] = projection_images[i];
+            new_edges.insert_slice(start_proj, [new Edge(
                 start,
                 DirectedVector.from_collinear( this.direction,
                     Vector.from_points(start, end) ),
                 end,
-            )]]);
+            )], end_proj);
         }
-        new_edges.add_guard(
-            projection_images[projection_images.length-1][0] );
+        { // XXX debug
+            let projection_span =
+                projection_images.max_key() - projection_images.min_key();
+            let new_edges_span = Array.from(new_edges.slice_values()).reduce(
+                (prev: number, edge) =>
+                    prev + edge.delta.project(this.direction),
+                0 );
+            if (
+                projection_images.max_key() != new_edges.max_key() ||
+                projection_images.min_key() != new_edges.min_key() ||
+                Math.abs(projection_span - new_edges_span) > EPSILON
+            ) {
+                let error: any = new Error();
+                error.info = {vertex_group: {vertices, edges}};
+                throw error;
+            }
+        }
 
         for (let [vertex, v_projections] of vertex_data) {
             let v_edge_map = new SlicedArray<Edge>();
+            v_edge_map.insert_guard(v_projections.min_key());
             for (let i = 1; i < v_projections.length; ++i) {
                 let [height, projection] = v_projections[i-1];
-                let [, next_projection] = v_projections[i];
-                v_edge_map.push([ height,
-                    new_edges.slice_values(projection, next_projection) ]);
+                let [next_height, next_proj] = v_projections[i];
+                v_edge_map.insert_slice( height,
+                    new_edges.slice_values(projection, next_proj),
+                next_height );
             }
-            v_edge_map.add_guard(v_projections[v_projections.length-1][0]);
             this.new_edge_map.set(vertex, v_edge_map);
         }
 
@@ -719,12 +761,20 @@ class Incutter {
             this.polygon,
             (vertex) => {
                 let heights = get_or_die(this.vertex_height_map, vertex);
-                return {
-                    edges: get_or_die(this.new_edge_map, vertex)
-                        .slice_values(heights.min(), heights.max()),
-                    min: heights.min(),
-                    max: heights.max(),
-                };
+                // XXX debug
+                let edges: SlicedArray<Edge> | null = null;
+                try {
+                    edges = get_or_die(this.new_edge_map, vertex);
+                    return {
+                        edges: get_or_die(this.new_edge_map, vertex)
+                            .slice_values(heights.min(), heights.max()),
+                        min: heights.min(),
+                        max: heights.max(),
+                    };
+                } catch (error: any) {
+                    error.info = Object.assign({vertex_edge_map: {vertex, heights, edges}})
+                    throw error;
+                }
             },
             (edge, height) => get_or_die(this.edge_image_map, edge)
                 .get(numeric_height(height)),
@@ -774,6 +824,18 @@ class HeightedFaceGraph extends PlanarGraph {
         }
     }
 
+    relative_edge_faces(edge: Edge):
+        {above: Polygon | null, below: Polygon | null}
+    {
+        if (edge.direction == this.direction)
+            throw new Error("This is a vertical edge");
+        let [below_face, above_face] = this.edge_faces(edge);
+        if (edge.delta.skew(this.direction) < 0) {
+            [below_face, above_face] = [above_face, below_face];
+        }
+        return {below: below_face, above: above_face};
+    }
+
     get_edge_height(edge: Edge): HeightRange | null {
         let height = this.edge_heights.get(edge);
         if (height === undefined)
@@ -807,15 +869,15 @@ class HeightedFaceGraph extends PlanarGraph {
             this._resolve_iffy_faces();
         }
     }
-    _mark_edge_faces_iffy(object: Edge) {
-        for (let face of this.edge_faces(object)) {
+    _mark_edge_faces_iffy(edge: Edge) {
+        for (let face of this.edge_faces(edge)) {
             if (face === null)
                 continue;
             this.iffy.faces.add(face);
         }
     }
-    _mark_face_edges_iffy(object: Polygon) {
-        for (let edge of object) {
+    _mark_face_edges_iffy(face: Polygon) {
+        for (let edge of face) {
             this.iffy.edges.add(edge);
         }
     }
@@ -827,12 +889,10 @@ class HeightedFaceGraph extends PlanarGraph {
             if (height == null)
                 continue;
             update_height: {
-                if (height.height !== null)
+                if (height.height !== undefined)
                     break update_height;
-                let [below_face, above_face] = this.edge_faces(edge);
-                if (edge.delta.skew(this.direction) < 0) {
-                    [below_face, above_face] = [above_face, below_face];
-                }
+                let {below: below_face, above: above_face}
+                    = this.relative_edge_faces(edge);
                 if (below_face !== null) {
                     let face_height = this.get_face_height(below_face);
                     if (face_height.min > height.min + EPSILON) {
@@ -848,6 +908,15 @@ class HeightedFaceGraph extends PlanarGraph {
                     }
                 }
                 if (height_changed && (height.max - height.min < EPSILON)) {
+                    if (height.max - height.min < -EPSILON) {
+                        let error: any = new Error(
+                            "Heights are not ordered correctly" );
+                        error.info = {resolve_iffy_edges: {
+                            edge, below_face, above_face,
+                            heighted_graph: this,
+                        }};
+                        throw error;
+                    }
                     height.height = height.max = height.min
                 }
             }
@@ -890,6 +959,9 @@ class HeightedFaceGraph extends PlanarGraph {
                     }
                 }
                 if (height_changed && (height.max - height.min < EPSILON)) {
+                    if (height.max - height.min < -EPSILON) {
+                        throw new Error("Heights are not ordered correctly");
+                    }
                     height.height = height.max = height.min
                 }
             }
@@ -898,39 +970,6 @@ class HeightedFaceGraph extends PlanarGraph {
             }
         }
         this.iffy.faces.clear();
-    }
-}
-
-class PRNG {
-    // /**
-    //  * @param numbers sorted array of at least two distinct numbers
-    //  */
-    // static add_number(numbers: Array<number>) {
-    //     let ranges: Array<[number, number]> = [];
-    //     for (let i = 1; i < numbers.length; ++i) {
-    //         ranges.push([numbers[i-1], numbers[i]]);
-    //     }
-    // }
-    static choose_weight(): number {
-        return Math.random();
-    }
-    static choose_element<T>(elements: Array<T>): T {
-        return elements[PRNG.choose_index(elements.length)];
-    }
-    static *choose_order<T>(elements: Array<T>): Generator<T,void,undefined> {
-        while (elements.length > 0) {
-            let index = PRNG.choose_index(elements.length);
-            yield* elements.splice(index, 1);
-        }
-    }
-    static choose_face(faces: Array<Polygon>): Polygon {
-        return PRNG.choose_element(faces);
-    }
-    static choose_index(length: number) {
-        let index = Math.floor(length * Math.random());
-        if (index >= length)
-            return index - 1;
-        return index;
     }
 }
 

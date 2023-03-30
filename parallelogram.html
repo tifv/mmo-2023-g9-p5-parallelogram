@@ -18,23 +18,27 @@
                 circle.dot {
                     stroke: var(--main-color);
                 }
-                path.polygon {
+                .polygon {
                     stroke-width: 1px;
                     fill: none;
                 }
-                path.edge {
+                .edge {
                     stroke-width: 0.5px;
                     stroke-linecap: round;
                 }
-                path.face {
+                .face {
+                    --main-color: blue;
                     stroke: none;
-                    fill: blue;
+                    fill: var(--main-color);
                     fill-opacity: 0.3;
                 }
                 .start_obj {
-                    --main-color: green;
+                    --main-color: darkgreen;
                 }
                 .end_obj {
+                    --main-color: darkblue;
+                }
+                .error_obj {
                     --main-color: red;
                 }
             </style>
@@ -43,6 +47,7 @@
 <script src="./lib/solver.js"></script>
 <script src="./build/common.js"></script>
 <script src="./build/graph.js"></script>
+<script src="./build/chooser.js"></script>
 <script src="./build/parallelogram.js"></script>
 <script src="./build/main.js"></script>
 </html>

@@ -95,6 +95,9 @@ class NumberMap<V> extends Array<[number,V]> {
     get(key: number): V {
         return this.find_key(key).value;
     }
+    has(key: number): boolean {
+        return this.find_key(key, false).key !== undefined;
+    }
     find_value(value: V): {index: number, key: number} {
         for (let i = 0; i < this.length; ++i) {
             let [cursor_key, cursor_value] = this[i];
@@ -103,11 +106,54 @@ class NumberMap<V> extends Array<[number,V]> {
         }
         throw new Error("Value is not in the map.");
     }
+    min_key(): number {
+        return this[0][0];
+    }
+    max_key(): number {
+        // XXX debug
+        try {
+            return this[this.length - 1][0];
+        } catch (error: any) {
+            error.info = {number_map: this};
+            throw error;
+        }
+    }
 }
 
 class SlicedArray<V> extends NumberMap<V[]> {
-    add_guard(number: number) {
-        this.push([number, []]);
+    insert_guard(guard_key: number): void {
+        this.set(guard_key, []);
+    }
+    insert_slice(start_key: number, values: V[], end_key: number) {
+        let insertion_target: Array<V>;
+        let start_index: number;
+        find_start:
+        {
+            let item = this.find_key(start_key, false);
+            if (item.key !== undefined) {
+                start_index = item.index;
+                insertion_target = item.value;
+            } else {
+                start_index = item.index;
+                insertion_target = new Array<V>();
+                this.splice(item.index, 0, [start_key, insertion_target]);
+            }
+        }
+        find_end:
+        {
+            let item = this.find_key(end_key, false);
+            if (item.key !== undefined) {
+                if (item.index != start_index + 1) {
+                    throw new Error("Slice space already occupied");
+                }
+            } else {
+                this.splice(item.index, 0, [end_key, []]);
+            }
+        }
+        if (insertion_target.length > 0) {
+            throw new Error("Slice space already occupied");
+        }
+        insertion_target.push(...values);
     }
     slice_values(start_key?: number, end_key?: number): Array<V> {
         let start_index: number = (start_key !== undefined) ?

@@ -4,6 +4,11 @@ class Pair {
     constructor(x: number, y: number) {
         this.x = x;
         this.y = y;
+        // XXX debug
+        Object.defineProperties(this, {
+            x: {value: x, enumerable: true},
+            y: {value: y, enumerable: true},
+        });
     }
     *[Symbol.iterator] () {
         yield this.x;
@@ -55,6 +60,11 @@ class DirectedVector extends Vector {
         super(direction.x * value, direction.y * value)
         this.direction = direction;
         this.value = value;
+        // XXX debug
+        Object.defineProperties(this, {
+            direction: {value: direction, enumerable: true},
+            value:     {value: value    , enumerable: true},
+        });
     }
     opposite(): DirectedVector {
         return new DirectedVector(this.direction, -this.value);
@@ -72,7 +82,7 @@ class DirectedVector extends Vector {
 
 class Point extends Pair {
     // XXX debug
-    id: string = crypto.randomUUID();
+    id: any = {id: crypto.randomUUID().substring(0, 7)};
 
     shift(vector: Vector): Point {
         return new Point(this.x + vector.x, this.y + vector.y);
@@ -90,7 +100,7 @@ class Edge {
     end: Point;
 
     // XXX debug
-    id: string = crypto.randomUUID();
+    id: any = {id: crypto.randomUUID().substring(0, 7)};
 
     constructor(start: Point, delta: DirectedVector, end: Point) {
         if (delta.value < 0)
@@ -98,6 +108,12 @@ class Edge {
         this.start = start;
         this.delta = delta;
         this.end = end;
+        // XXX debug
+        Object.defineProperties(this, {
+            start: {value: start, enumerable: true},
+            delta: {value: delta, enumerable: true},
+            end:   {value: end  , enumerable: true},
+        });
     }
 
     *[Symbol.iterator] (): Generator<Point, void, undefined> {
@@ -198,6 +214,7 @@ class Edge {
 
 type OrientedEdge = {
     edge: Edge, index: number,
+    start: Point, end: Point,
     forward: boolean, vector: DirectedVector,
 }
 
@@ -205,6 +222,10 @@ class Polygon {
     edges: Array<Edge>;
     size: number;
     vertices: Array<Point>;
+
+    // XXX debug
+    id: any = {id: crypto.randomUUID().substring(0, 7)};
+
     constructor(start: Point, edges: Array<Edge>) {
         this.edges = edges;
         this.size = edges.length;
@@ -241,9 +262,11 @@ class Polygon {
         for (let [index, edge] of this.edges.entries()) {
             if (edge.start === vertex) {
                 yield { edge, index,
+                    start: edge.start, end: edge.end,
                     forward: true, vector: edge.delta };
             } else {
                 yield { edge, index,
+                    start: edge.end, end: edge.start,
                     forward: false, vector: edge.delta.opposite() };
             }
             vertex = edge.other_end(vertex);
@@ -363,6 +386,15 @@ class Polygon {
         };
     }
 
+    get_area(): number {
+        let area = 0;
+        let first_vertex = this.vertices[0];
+        for (let {start, vector} of this.oriented_edges()) {
+            area += vector.skew(Vector.from_points(first_vertex, start));
+        }
+        return area / 2;
+    }
+
     static from_vectors(origin: Point, vectors: Array<DirectedVector>):
         Polygon
     {
@@ -456,7 +488,7 @@ class PlanarGraph {
     vertex_edges(vertex: Point): EdgeSet {
         let edgeset = this.edgemap.get(vertex);
         if (edgeset === undefined)
-            throw new Error("Graph data structure is compromised");
+            throw new Error("The vertex does not have an incident edge");
         return edgeset;
     }
     static _build_facemap(faces: Iterable<Polygon>): Map<Edge,FaceSet> {
@@ -484,7 +516,8 @@ class PlanarGraph {
     edge_faces(edge: Edge): FaceSet {
         let faceset = this.facemap.get(edge);
         if (faceset === undefined) {
-            let error: any = new Error("PlanarGraph data structure is compromised");
+            let error: any = new Error(
+                "The edge does not have an incident face" );
             error.info = {edge_faces: {edge, graph: this}}
             throw error;
         }
@@ -529,6 +562,118 @@ class PlanarGraph {
             faces.push(face.substitute(vertex_map, edge_map));
         }
         return new PlanarGraph(vertices, edges, faces);
+    }
+
+    check({
+        vertices_without_edges = true,
+        edges_with_rogue_vertices = true,
+        edges_without_faces = true,
+        edges_with_one_face = true,
+        faces_with_rogue_edges = true,
+        face_orientation = true,
+    }: {[name: string]: boolean} = {}) {
+        let errors: any[] = [];
+
+        if (vertices_without_edges) {
+            let lone_vertices = new Array<Point>();
+            for (let vertex of this.vertices) {
+                let edges = this.edgemap.get(vertex);
+                if (edges === undefined) {
+                    lone_vertices.push(vertex);
+                    continue;
+                }
+            }
+            if (lone_vertices.length > 0) {
+                errors.push({vertices_without_edges: lone_vertices});
+            }
+        }
+        if (edges_with_rogue_vertices) {
+            let rogue_vertices = new Map<Edge,Point[]>();
+            for (let edge of this.edges) {
+                let edge_rogue_vertices = new Array<Point>();
+                for (let vertex of edge) {
+                    if (!this.vertices.has(vertex)) {
+                        edge_rogue_vertices.push(vertex);
+                    }
+                }
+                if (edge_rogue_vertices.length > 0) {
+                    rogue_vertices.set(edge, edge_rogue_vertices);
+                }
+            }
+            if (rogue_vertices.size > 0) {
+                errors.push({edges_with_rogue_vertices: rogue_vertices});
+            }
+        }
+
+        if (edges_without_faces) {
+            let zerosided_edges = new Array<Edge>();
+            let onesided_edges = new Array<Edge>();
+            for (let edge of this.edges) {
+                let faces = this.facemap.get(edge);
+                if (faces === undefined) {
+                    zerosided_edges.push(edge);
+                    continue;
+                }
+                if (!edges_with_one_face) {
+                    continue;
+                }
+                if (faces[0] === null || faces[1] === null) {
+                    onesided_edges.push(edge);
+                    continue;
+                }
+            }
+            if (zerosided_edges.length > 0 || onesided_edges.length > 0) {
+                errors.push({edges_without_faces: Object.assign({},
+                    zerosided_edges.length > 0 ? {zero: zerosided_edges} : null,
+                    onesided_edges.length > 0 ? {one: onesided_edges} : null,
+                    {all: zerosided_edges.concat(onesided_edges)},
+                )});
+            }
+        }
+        if (faces_with_rogue_edges) {
+            let rogue_edges = new Map<Polygon,Edge[]>();
+            for (let face of this.faces) {
+                let face_rogue_edges = new Array<Edge>();
+                for (let edge of face) {
+                    if (!this.edges.has(edge)) {
+                        face_rogue_edges.push(edge);
+                    }
+                }
+                if (face_rogue_edges.length > 0) {
+                    rogue_edges.set(face, face_rogue_edges);
+                }
+            }
+            if (rogue_edges.size > 0) {
+                errors.push({faces_with_rogue_edges: rogue_edges});
+            }
+        }
+
+        let outer_face: Polygon | null = null;
+        face_orientation:
+        if (face_orientation) {
+            let reverse_faces = new Array<Polygon>();
+            for (let face of this.faces) {
+                if (face.get_area() < 0) {
+                    reverse_faces.push(face);
+                }
+            }
+            if (reverse_faces.length == 0) {
+                errors.push({face_orientation: {reverse: []}});
+                break face_orientation;
+            }
+            if (reverse_faces.length == 1) {
+                [outer_face] = reverse_faces;
+                break face_orientation;
+            }
+            errors.push({face_orientation: {reverse: reverse_faces}});
+        }
+
+        if (errors.length > 0) {
+            let error: any = new Error("Graph integrity compromised");
+            error.info = { Graph_check:
+                Object.assign({graph: this, outer_face}, ...errors) };
+            throw error;
+        }
     }
 }
 
