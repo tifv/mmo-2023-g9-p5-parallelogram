@@ -173,6 +173,37 @@ class SlicedArray<V> extends NumberMap<V[]> {
     }
 }
 
+class BiMap<K1,K2,V> extends Map<K1,Map<K2,V>> {
+    has2(key1: K1, key2: K2): boolean {
+        let submap = this.get(key1);
+        if (submap === undefined)
+            return false;
+        return submap.has(key2);
+    }
+    get2(key1: K1, key2: K2): V | undefined {
+        let submap = this.get(key1);
+        if (submap === undefined)
+            return undefined;
+        return submap.get(key2);
+    }
+    set2(key1: K1, key2: K2, value: V): this {
+        let submap = this.get(key1);
+        if (submap === undefined) {
+            submap = new Map<K2,V>();
+            this.set(key1, submap);
+        }
+        submap.set(key2, value);
+        return this;
+    }
+    *entries2(): IterableIterator<[K1,K2,V]> {
+        for (let [key1, submap] of this.entries()) {
+            for (let [key2, value] of submap.entries()) {
+                yield [key1, key2, value];
+            }
+        }
+    }
+}
+
 type LPModel = {
     optimize: any,
     opType: any,

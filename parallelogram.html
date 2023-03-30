@@ -5,41 +5,63 @@
         </style>
     </head>
     <body>
-        <svg id="canvas">
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="800px" height="800px"
+            id="canvas"
+        >
             <style>
                 :is(path), :is(circle) {
-                    --main-color: black;
+                    --main-stroke-color: black;
+                    --main-fill-color: blue;
                 }
                 path {
-                    stroke: var(--main-color);
+                    stroke: var(--main-stroke-color);
                     fill: none;
                     stroke-linejoin: round;
                 }
                 circle.dot {
-                    stroke: var(--main-color);
+                    stroke: var(--main-stroke-color);
                 }
                 .polygon {
                     stroke-width: 1px;
                     fill: none;
                 }
                 .edge {
+                    stroke: var(--main-stroke-color);
                     stroke-width: 0.5px;
                     stroke-linecap: round;
                 }
                 .face {
-                    --main-color: blue;
                     stroke: none;
-                    fill: var(--main-color);
+                    fill: var(--main-fill-color);
                     fill-opacity: 0.3;
                 }
+                .face.face__border {
+                    stroke: var(--main-stroke-color);
+                    stroke-width: 0.75px;
+                }
+                .face.face__outer {
+                    fill: none;
+                }
+                .unknown_height {
+                    --main-stroke-color: red;
+                    --main-fill-color: red;
+                }
+                .edge__vertical {
+                    --main-stroke-color: gray;
+                }
                 .start_obj {
-                    --main-color: darkgreen;
+                    --main-stroke-color: darkgreen;
+                    --main-fill-color: green;
                 }
                 .end_obj {
-                    --main-color: darkblue;
+                    --main-stroke-color: darkblue;
+                    --main-fill-color: blue;
                 }
                 .error_obj {
-                    --main-color: red;
+                    --main-stroke-color: red;
+                    --main-fill-color: red;
                 }
             </style>
         </svg>

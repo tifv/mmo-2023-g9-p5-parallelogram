@@ -1,57 +1,77 @@
 const POLYGON_SIZE = Object.freeze({
-    M: 7, a: 30,
+    M: 7, r: 80,
 });
 
+const SVGNS = "http://www.w3.org/2000/svg";
+
 document.addEventListener('DOMContentLoaded', function() {
+    const {M, r} = POLYGON_SIZE;
     let canvas_svg = document.getElementById('canvas');
     if (canvas_svg === null || ! (canvas_svg instanceof SVGSVGElement))
         throw new Error();
     let canvas = new Canvas(canvas_svg);
-    let viewBox: any;
+    let set_canvas_viewBox = () => {
+        canvas.svg.setAttribute( 'viewBox',
+        [-1.2*r, -1.2*r, 2.4*r, 2.4*r].join(" ") );
+    };
+    set_canvas_viewBox()
     let new_canvas = () => {
         canvas = new Canvas();
         document.body.appendChild(canvas.svg);
-        canvas.svg.setAttribute('viewBox', viewBox);
+        set_canvas_viewBox();
     }
 
     try {
         main(canvas);
     } catch (error: any) {
-        viewBox = canvas.svg.getAttribute('viewBox');
         console.log(error);
         console.log(error.info);
-        let bad_graph = error?.info?.PlanarGraph?.graph;
-        if (bad_graph != null) {
-            console.log("drawing graph with a bad construction")
-            canvas.draw_graph(bad_graph);
+        let uncut_region = error?.info?.find_flows?.uncut_region;
+        if (uncut_region != null) {
+            console.log("drawing uncut region")
+            canvas.draw_uncut_region(uncut_region);
             new_canvas();
         }
-        let failed_graph = error?.info?.Graph_check?.graph;
-        if (failed_graph != null) {
-            console.log("drawing graph with a bad construction")
-            let error_data = error.info.Graph_check
+        let failed_graph_info = error?.info?.PlanarGraph;
+        if (failed_graph_info?.graph != null) {
+            console.log("drawing graph that failed to construct")
+            canvas.draw_graph(failed_graph_info.graph);
+            new_canvas();
+        }
+        let bad_graph_info = error?.info?.Graph_check;
+        if (bad_graph_info?.graph != null) {
+            console.log("drawing graph that failed checks")
             let mask = new Set<Polygon|Edge>();
-            for (let edge of <Edge[]>error_data?.edges_without_faces.all || []) {
+            for (let edge of <Edge[]>bad_graph_info?.edges_without_faces?.all || []) {
                 canvas.draw_edge(edge, {classes: ["edge", "error_obj"]});
                 mask.add(edge);
             }
             for ( let [face] of <Iterable<[Polygon,Edge[]]>>
-                error_data?.faces_with_rogue_edges || [] )
+                bad_graph_info?.faces_with_rogue_edges || [] )
             {
                 canvas.draw_polygon(face, {classes: ["face", "error_obj"]});
                 mask.add(face);
             }
-            canvas.draw_graph(failed_graph, mask);
+            canvas.draw_graph(bad_graph_info.graph, mask);
             new_canvas();
         }
-        let bad_edge_graph = error?.info?.edge_faces?.graph;
-        if (bad_edge_graph != null) {
+        let bad_edge_info = error?.info?.PLanarGraph_edge_faces;
+        if (bad_edge_info?.graph != null) {
             console.log("drawing graph with a bad edge")
-            let edge = error.info.edge_faces.edge;
-            canvas.draw_graph(bad_edge_graph, new Set([edge]));
+            let edge = bad_edge_info.edge;
+            canvas.draw_graph(bad_edge_info.graph, new Set([edge]));
             canvas.draw_edge( edge,
                 {classes: ["edge"],
                     style: {stroke: "cyan", strokeWidth: '0.75px'}} );
+            new_canvas();
+        }
+        let bad_heighted_graph =
+            error?.info?.inordered_heights?.graph ||
+            error?.info?.incut?.heighted_graph ||
+            error?.info?.HeightedGraph_check?.graph;
+        if (bad_heighted_graph != null) {
+            console.log("drawing graph with (maybe) incorrectly ordered heights")
+            canvas.draw_heighted_graph(bad_heighted_graph);
             new_canvas();
         }
         let region_history = error?.info?.construct_cut_region?.region_history;
@@ -71,27 +91,25 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function main(canvas: Canvas) {
-    const {M, a} = POLYGON_SIZE;
-    let {polygon, directions} = Polygon.make_regular(M, a);
+    const {M, r} = POLYGON_SIZE;
+    // const a = r * 2 * Math.sin(Math.PI/(2*M));
+    let {polygon, directions, side_length: a} = Polygon.make_regular_even(
+        new Point(0, 0), M, r );
     let dir1 = directions[1], dir3 = directions[M-1];
     let vec1 = new DirectedVector(dir1, 0.3*a);
     let vec3 = new DirectedVector(dir3, -0.6*a);
     let vec2 = DirectedVector.make_direction(
         vec1.opposite().add(vec3.opposite()))
-    let triangle1 = Polygon.from_vectors( new Point(a, a),
+    let triangle1 = Polygon.from_vectors( new Point(-0.5*a, -a),
         [vec1, vec2, vec3] );
-    let triangle2 = Polygon.from_vectors( new Point(a, 3*a),
+    let triangle2 = Polygon.from_vectors( new Point(0, +a),
         [vec1.opposite(), vec2.opposite(), vec3.opposite()] )
-    let canvas_svg = document.getElementById('canvas');
-    if (canvas_svg === null || ! (canvas_svg instanceof SVGSVGElement))
-        throw new Error();
-    canvas.svg.setAttribute( 'viewBox',
-        [-(M+1)*a/2, -a/2, (2*M+1)*a/2, (M+1)*a/2].join(" ") );
 
     let uncut_region = new UncutRegion(polygon, triangle1, triangle2);
     let flow_directions = select_flowing_sector(uncut_region);
     let flows = find_flows(uncut_region, flow_directions);
     let cut_region = construct_cut_region(uncut_region, flows);
+    canvas.draw_cut_region(cut_region);
 }
 
 type FillDrawOptions = {
@@ -103,29 +121,31 @@ class Canvas {
     svg: SVGSVGElement;
     constructor(svg: SVGSVGElement | null = null) {
         if (svg === null)
-            svg = makesvg('svg')
+            svg = makesvg('svg', {attributes: {
+                xmlns: SVGNS,
+                width: "500px", height: "500px",
+            }});
         this.svg = svg;
     }
-    draw_edge(edge: Edge, options?: FillDrawOptions) {
-        makesvg('path', {
+    draw_edge(edge: Edge, options?: FillDrawOptions): SVGPathElement {
+        return makesvg('path', {
             attributes: {
                 d: [
-                    "M", edge.start.x, edge.start.y,
-                    "L", edge.end.x, edge.end.y,
+                    "M", edge.start.x, -edge.start.y,
+                    "L", edge.end  .x, -edge.end  .y,
                 ].join(" "),
-                id: edge.id,
             },
             classes: options?.classes,
             style: options?.style,
             parent: this.svg,
         });
     }
-    draw_polygon(polygon: Polygon, options?: FillDrawOptions) {
+    draw_polygon(polygon: Polygon, options?: FillDrawOptions): SVGPathElement {
         let path_items = new Array<string|number>();
         let first_vertex = true;
         for (let vertex of polygon.vertices) {
             path_items.push(first_vertex ? "M" : "L");
-            path_items.push(vertex.x, vertex.y);
+            path_items.push(vertex.x, -vertex.y);
             first_vertex = false;
         }
         path_items.push("Z");
@@ -141,7 +161,7 @@ class Canvas {
     mark_dot(point: Point, options: FillDrawOptions = {}) {
         makesvg('circle', {
             attributes: {
-                cx: point.x, cy: point.y,
+                cx: point.x, cy: -point.y,
                 r: 0.5,
             },
             classes: ["dot"].concat(options?.classes || []),
@@ -149,18 +169,32 @@ class Canvas {
             parent: this.svg,
         });
     }
+    draw_uncut_region(region: UncutRegion) {
+        let do_border_face = (polygon: Polygon, options?: FillDrawOptions) => {
+            this.draw_polygon(polygon, options);
+        }
+        do_border_face(region.polygon, {classes:
+            ["face", "face__outer", "border", "face__border"] });
+        do_border_face(region.triangle1, {classes:
+            ["start_obj", "face", "border", "face__border"] });
+        do_border_face(region.triangle2, {classes:
+            ["end_obj", "face", "border", "face__border"] });
+    }
     draw_cut_region(region: CutRegion) {
-        let drawn_edges = new Set<Edge>();
-        let do_polygon = (polygon: Polygon, options?: FillDrawOptions) => {
+        let mask = new Set<Edge|Polygon>();
+        let do_border_face = (polygon: Polygon, options?: FillDrawOptions) => {
             this.draw_polygon(polygon, options);
             for (let edge of polygon)
-                drawn_edges.add(edge);
+                mask.add(edge);
         }
-        do_polygon(region.outer_face);
-        do_polygon(region.triangle1, {classes: ["start_obj"]});
-        do_polygon(region.triangle2, {classes: ["end_obj"]});
+        do_border_face(region.outer_face, {classes:
+            ["face", "face__outer", "border", "face__border"] });
+        do_border_face(region.triangle1, {classes:
+            ["start_obj", "face", "border", "face__border"] });
+        do_border_face(region.triangle2, {classes:
+            ["end_obj", "face", "border", "face__border"] });
         for (let edge of region.graph.edges) {
-            if (drawn_edges.has(edge))
+            if (mask.has(edge))
                 continue;
             this.draw_edge(edge, {classes: ["edge"]});
         }
@@ -181,6 +215,42 @@ class Canvas {
             this.draw_edge(edge, {classes: ["edge"]});
         }
     }
+    draw_heighted_graph(
+        graph: HeightedFaceGraph,
+    ) {
+        for (let face of graph.faces) {
+            let heights = graph.get_face_height(face);
+            let height = heights.height !== undefined ? heights.height :
+                (heights.min + heights.max) / 2;
+            let shift = new DirectedVector(graph.direction, height);
+            let drawn_face = Polygon.from_vectors(
+                face.vertices[0].shift(shift),
+                Array.from(face.oriented_edges()).map(({vector}) => vector) );
+            let element = this.draw_polygon(drawn_face, {classes: [
+                "face",
+                ...(heights.height === undefined ? ["unknown_height"] : []),
+            ]});
+            element.onclick = () => {console.log({face, heights});};
+        }
+        for (let edge of graph.edges) {
+            let heights = graph.get_edge_height(edge);
+            let height: number;
+            if (heights !== null) {
+                height = heights.height !== undefined ? heights.height :
+                    (heights.min + heights.max) / 2;
+            } else {
+                height = 0;
+            }
+            let shift = new DirectedVector(graph.direction, height);
+            let drawn_edge = edge.shift(shift);
+            let element = this.draw_edge(drawn_edge, {classes: [
+                "edge",
+                ...( (heights === null) ? ["edge__vertical"] :
+                    (heights.height === undefined ? ["unknown_height"] : []) ),
+            ]});
+            element.onclick = () => {console.log({edge, heights});};
+        }
+    }
 }
 
 type MakeOptions = {
@@ -190,13 +260,13 @@ type MakeOptions = {
     text?: string | null,
     children?: HTMLElement[],
     parent?: Node | null,
-    namespace?: "http://www.w3.org/2000/svg" | null,
+    namespace?: typeof SVGNS | null,
 }
 type MakeHTMLOptions = MakeOptions & {
     namespace?: null,
 }
 type MakeSVGOptions = MakeOptions & {
-    namespace: "http://www.w3.org/2000/svg",
+    namespace: typeof SVGNS,
 }
 
 function makehtml(tag: string, options: MakeHTMLOptions): HTMLElement;
@@ -242,6 +312,6 @@ function makesvg(tag: string, options?: MakeOptions): SVGElement
 
 function makesvg(tag: string, options: MakeOptions = {}): SVGElement {
     return makehtml( tag,
-        Object.assign(options, {namespace: "http://www.w3.org/2000/svg"}) );
+        Object.assign(options, {namespace: SVGNS}) );
 }
 

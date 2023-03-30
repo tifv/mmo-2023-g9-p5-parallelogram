@@ -101,6 +101,9 @@ class Edge {
 
     // XXX debug
     id: any = {id: crypto.randomUUID().substring(0, 7)};
+    toString() {
+        return "Edge[" + this.id.id + "]";
+    }
 
     constructor(start: Point, delta: DirectedVector, end: Point) {
         if (delta.value < 0)
@@ -190,11 +193,15 @@ class Edge {
         let
             start = vertex_map(this.start),
             end = vertex_map(this.end);
+        // XXX debug: disabled old edge objects retaining
+        return new Edge(start, this.delta, end);
+
         if (start === this.start && end === this.end)
             return this;
         return new Edge(start, this.delta, end);
     }
 
+    // XXX debug
     static *debug_edge_generation(edges: Generator<Edge,void,undefined>):
         Generator<Edge,void,undefined>
     {
@@ -284,15 +291,32 @@ class Polygon {
         end_index: number,
         {allow_empty = false} = {},
     ): Array<Edge> {
+        return this._slice_cyclic_array( this.edges,
+            start_index, end_index, {allow_empty} );
+    }
+    slice_oriented_edges(
+        start_index: number,
+        end_index: number,
+        {allow_empty = false} = {},
+    ): Array<OrientedEdge> {
+        return this._slice_cyclic_array( Array.from(this.oriented_edges()),
+            start_index, end_index, {allow_empty} );
+    }
+    _slice_cyclic_array<V>(
+        array: Array<V>,
+        start_index: number,
+        end_index: number,
+        {allow_empty = false} = {},
+    ): Array<V> {
         start_index = this._index_modulo(start_index);
         end_index = this._index_modulo(end_index);
         if ( allow_empty && end_index >= start_index ||
             end_index > start_index )
         {
-            return this.edges.slice(start_index, end_index);
+            return array.slice(start_index, end_index);
         }
-        return this.edges.slice(start_index).concat(
-            this.edges.slice(0, end_index) );
+        return array.slice(start_index).concat(
+            array.slice(0, end_index) );
     }
     get_vertex(index: number): Point {
         if (this.edges.length == 0)
@@ -309,17 +333,19 @@ class Polygon {
         vertex_map: (vertex: Point) => Point,
         edge_map: (edge: Edge) => (Edge | Edge[]),
     ): Polygon {
-        let changes = false;
+        // set to true to ensure start of the generator in case of refactoring
+        let edge_changes = true;
         function* new_edges(
             oriented_edges: Generator<OrientedEdge, void, undefined>,
         ): Generator<Edge, void, undefined> {
+            edge_changes = false;
             for (let {edge, forward} of oriented_edges) {
                 let replacement = edge_map(edge);
                 if (replacement === edge) {
                     yield edge;
                     continue;
                 }
-                changes = true;
+                edge_changes = true;
                 if (replacement instanceof Edge) {
                     yield replacement;
                     continue;
@@ -331,12 +357,11 @@ class Polygon {
             }
         }
         let start = vertex_map(this.vertices[0]);
-        if (start !== this.vertices[0])
-            changes = true;
-        if (!changes)
+        let edges = Array.from(new_edges(this.oriented_edges()));
+        if (start === this.vertices[0] && !edge_changes)
             return this;
-        return new Polygon( start,
-            Array.from(new_edges(this.oriented_edges())) );
+        let polygon = new Polygon(start, edges);
+        return polygon;
     }
 
     find_tangent_points(direction: AbstractVector): {
@@ -419,11 +444,14 @@ class Polygon {
         return new Polygon(origin, edges);
     }
 
-    static make_regular(n: number, side_length: number = 1.0):
-        {polygon: Polygon, directions: Direction[]}
+    static make_regular_even( center: Point,
+        n: number, radius: number,
+    ): {polygon: Polygon, directions: Direction[], side_length: number}
     {
         let directions: Array<Direction> = [];
         let vectors: Array<DirectedVector> = [];
+        let centeral_angle = Math.PI/(n)
+        let side_length = radius * 2 * Math.sin(centeral_angle/2);
         for (let i = 0; i < n; ++i) {
             let direction = Direction.from_angle((Math.PI/n) * i);
             directions.push(direction);
@@ -434,8 +462,13 @@ class Polygon {
             vectors.push(new DirectedVector(direction, -side_length));
         }
         return {
-            polygon: Polygon.from_vectors(new Point(0, 0), vectors),
+            polygon: Polygon.from_vectors(
+                center.shift(new Vector(
+                    -side_length/2, radius * -Math.cos(centeral_angle/2) )),
+                vectors
+            ),
             directions: directions,
+            side_length,
         };
     }
 
@@ -564,6 +597,9 @@ class PlanarGraph {
         return new PlanarGraph(vertices, edges, faces);
     }
 
+    check(options?: {[name: string]: boolean, return_errors: true}):
+        {errors: any[], info: any[]}
+    check(options?: {[name: string]: boolean}): void
     check({
         vertices_without_edges = true,
         edges_with_rogue_vertices = true,
@@ -571,8 +607,9 @@ class PlanarGraph {
         edges_with_one_face = true,
         faces_with_rogue_edges = true,
         face_orientation = true,
-    }: {[name: string]: boolean} = {}) {
-        let errors: any[] = [];
+        return_errors = false,
+    }: {[name: string]: boolean} = {}): {errors: any[], info: any[]} | void {
+        let errors: any[] = [], info: any[] = [{graph: this}];
 
         if (vertices_without_edges) {
             let lone_vertices = new Array<Point>();
@@ -648,7 +685,6 @@ class PlanarGraph {
             }
         }
 
-        let outer_face: Polygon | null = null;
         face_orientation:
         if (face_orientation) {
             let reverse_faces = new Array<Polygon>();
@@ -662,16 +698,19 @@ class PlanarGraph {
                 break face_orientation;
             }
             if (reverse_faces.length == 1) {
-                [outer_face] = reverse_faces;
+                let [outer_face] = reverse_faces;
+                info.push({outer_face})
                 break face_orientation;
             }
             errors.push({face_orientation: {reverse: reverse_faces}});
         }
 
+        if (return_errors)
+            return {errors, info};
         if (errors.length > 0) {
             let error: any = new Error("Graph integrity compromised");
             error.info = { Graph_check:
-                Object.assign({graph: this, outer_face}, ...errors) };
+                Object.assign({}, ...info, ...errors) };
             throw error;
         }
     }

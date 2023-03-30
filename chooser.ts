@@ -1,4 +1,4 @@
-class Chooser {
+class TrivialChooser {
     static add_number(numbers: NumberSet): void {
         let length = numbers.length;
         let n = 2;
@@ -12,23 +12,23 @@ class Chooser {
         return 0;
     }
     static choose_element<T>(elements: Array<T>): T {
-        return elements[Chooser.choose_index(elements.length)];
+        return elements[this.choose_index(elements.length)];
     }
     static *choose_order<T>(elements: Array<T>): Generator<T,void,undefined> {
         while (elements.length > 0) {
-            let index = Chooser.choose_index(elements.length);
+            let index = this.choose_index(elements.length);
             yield* elements.splice(index, 1);
         }
     }
     static choose_face(faces: Array<Polygon>): Polygon {
-        return Chooser.choose_element(faces);
+        return this.choose_element(faces);
     }
     static choose_index(length: number): number {
         return 0;
     }
 }
 
-class RandomChooser extends Chooser {
+class RandomChooser extends TrivialChooser {
     static add_number(numbers: NumberSet) {
         numbers.add( Math.random() * (numbers.max() - numbers.min())
             + numbers.min() );
@@ -44,3 +44,4 @@ class RandomChooser extends Chooser {
     }
 }
 
+var Chooser = RandomChooser;
