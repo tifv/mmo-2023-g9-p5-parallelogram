@@ -76,7 +76,7 @@ function find_flows(region: UncutRegion, flow_directions: FlowDirections): Flows
         var_a: string; var_b: string; var_c: string;
     }> = [];
     for (let [i, vector] of vectors.entries()) {
-        let direction: AbstractVector, k: number;
+        let direction: Graphs.AbstractVector, k: number;
         if (vector.value >= 0) {
             direction = vector.direction;
             k = 1;
@@ -114,11 +114,11 @@ function find_flows(region: UncutRegion, flow_directions: FlowDirections): Flows
         flow_params[i] = {k, var_a, var_b, var_c};
     }
     let
-        {x: constr_a_x, y: constr_a_y} = Vector.from_points(
+        {x: constr_a_x, y: constr_a_y} = Graphs.Vector.from_points(
             sector_start, region.points1[0] ),
-        {x: constr_b_x, y: constr_b_y} = Vector.from_points(
+        {x: constr_b_x, y: constr_b_y} = Graphs.Vector.from_points(
             region.points1[1], region.points2[0] ),
-        {x: constr_c_x, y: constr_c_y} = Vector.from_points(
+        {x: constr_c_x, y: constr_c_y} = Graphs.Vector.from_points(
             region.points2[1], sector_end );
     Object.assign(model.constraints, {
         constr_a_x: {equal: constr_a_x},

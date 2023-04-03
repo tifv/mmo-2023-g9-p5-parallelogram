@@ -110,13 +110,7 @@ class NumberMap<V> extends Array<[number,V]> {
         return this[0][0];
     }
     max_key(): number {
-        // XXX debug
-        try {
-            return this[this.length - 1][0];
-        } catch (error: any) {
-            error.info = {number_map: this};
-            throw error;
-        }
+        return this[this.length - 1][0];
     }
 }
 

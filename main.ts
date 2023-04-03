@@ -8,17 +8,8 @@ document.addEventListener('DOMContentLoaded', function meta_main() {
     main();
 });
 
-function main() {
+function build_uncut_region(): UncutRegion {
     const {M, r} = POLYGON_SIZE;
-    let canvas_svg = document.getElementById('canvas');
-    if (canvas_svg === null || ! (canvas_svg instanceof SVGSVGElement))
-        throw new Error();
-    let canvas = new Canvas(canvas_svg);
-    let set_canvas_viewBox = () => {
-        canvas.svg.setAttribute( 'viewBox',
-        [-1.2*r, -1.2*r, 2.4*r, 2.4*r].join(" ") );
-    };
-    set_canvas_viewBox();
     let {polygon, directions, side_length: a} = Polygon.make_regular_even(
         new Point(0, 0), M, r );
     let dir1 = directions[1], dir3 = directions[M-1];
@@ -31,6 +22,21 @@ function main() {
     let triangle2 = Polygon.from_vectors( new Point(0, +a),
         [vec1.opposite(), vec2.opposite(), vec3.opposite()] )
     let uncut_region = new UncutRegion(polygon, triangle1, triangle2);
+    return uncut_region;
+}
+
+function main() {
+    const {M, r} = POLYGON_SIZE;
+    let canvas_svg = document.getElementById('canvas');
+    if (canvas_svg === null || ! (canvas_svg instanceof SVGSVGElement))
+        throw new Error();
+    let canvas = new Canvas(canvas_svg);
+    let set_canvas_viewBox = () => {
+        canvas.svg.setAttribute( 'viewBox',
+        [-1.2*r, -1.2*r, 2.4*r, 2.4*r].join(" ") );
+    };
+    set_canvas_viewBox();
+    let uncut_region = build_uncut_region();
     let flow_directions = select_flowing_sector(uncut_region);
 
     let reload = () => {
@@ -152,21 +158,7 @@ function main_debug() {
 };
 
 function main_debug_try(canvas: Canvas) {
-    const {M, r} = POLYGON_SIZE;
-    // const a = r * 2 * Math.sin(Math.PI/(2*M));
-    let {polygon, directions, side_length: a} = Polygon.make_regular_even(
-        new Point(0, 0), M, r );
-    let dir1 = directions[1], dir3 = directions[M-1];
-    let vec1 = new DirectedVector(dir1, 0.3*a);
-    let vec3 = new DirectedVector(dir3, -0.6*a);
-    let vec2 = DirectedVector.make_direction(
-        vec1.opposite().add(vec3.opposite()))
-    let triangle1 = Polygon.from_vectors( new Point(-0.5*a, -a),
-        [vec1, vec2, vec3] );
-    let triangle2 = Polygon.from_vectors( new Point(0, +a),
-        [vec1.opposite(), vec2.opposite(), vec3.opposite()] )
-
-    let uncut_region = new UncutRegion(polygon, triangle1, triangle2);
+    let uncut_region = build_uncut_region();
     let flow_directions = select_flowing_sector(uncut_region);
     let flows = find_flows(uncut_region, flow_directions);
     let cut_region = construct_cut_region(uncut_region, flows);
@@ -261,7 +253,7 @@ class Canvas {
         }
     }
     draw_graph(
-        graph: GraphLike,
+        graph: Graphs.GraphLike,
         mask: Set<Edge|Polygon> | null = null,
     ) {
         for (let face of graph.faces) {

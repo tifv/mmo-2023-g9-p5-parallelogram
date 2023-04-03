@@ -1,14 +1,15 @@
+namespace Graphs {
+
 class Pair {
     x: number;
     y: number;
     constructor(x: number, y: number) {
         this.x = x;
         this.y = y;
-        // XXX debug
-        Object.defineProperties(this, {
-            x: {value: x, enumerable: true},
-            y: {value: y, enumerable: true},
-        });
+        // Object.defineProperties(this, {
+        //     x: {value: x, enumerable: true},
+        //     y: {value: y, enumerable: true},
+        // });
     }
     *[Symbol.iterator] () {
         yield this.x;
@@ -16,7 +17,7 @@ class Pair {
     }
 }
 
-class AbstractVector extends Pair {
+export class AbstractVector extends Pair {
     opposite(): AbstractVector {
         return new AbstractVector(-this.x, -this.y);
     }
@@ -28,7 +29,7 @@ class AbstractVector extends Pair {
     }
 }
 
-class Direction extends AbstractVector {
+export class Direction extends AbstractVector {
     constructor(x: number, y: number) {
         let length = (x**2 + y**2)**(1/2);
         super(x / length, y / length);
@@ -38,7 +39,7 @@ class Direction extends AbstractVector {
     }
 }
 
-class Vector extends AbstractVector {
+export class Vector extends AbstractVector {
     static from_points(start: Point, end: Point) {
         return new Vector(end.x - start.x, end.y - start.y);
     }
@@ -53,18 +54,17 @@ class Vector extends AbstractVector {
     }
 }
 
-class DirectedVector extends Vector {
+export class DirectedVector extends Vector {
     direction: Direction;
     value: number;
     constructor(direction: Direction, value: number) {
         super(direction.x * value, direction.y * value)
         this.direction = direction;
         this.value = value;
-        // XXX debug
-        Object.defineProperties(this, {
-            direction: {value: direction, enumerable: true},
-            value:     {value: value    , enumerable: true},
-        });
+        // Object.defineProperties(this, {
+        //     direction: {value: direction, enumerable: true},
+        //     value:     {value: value    , enumerable: true},
+        // });
     }
     opposite(): DirectedVector {
         return new DirectedVector(this.direction, -this.value);
@@ -80,9 +80,7 @@ class DirectedVector extends Vector {
     }
 }
 
-class Point extends Pair {
-    // XXX debug
-    id: any = {id: crypto.randomUUID().substring(0, 7)};
+export class Point extends Pair {
 
     shift(vector: Vector): Point {
         return new Point(this.x + vector.x, this.y + vector.y);
@@ -93,17 +91,10 @@ class Point extends Pair {
     }
 }
 
-
-class Edge {
+export class Edge {
     start: Point;
     delta: DirectedVector;
     end: Point;
-
-    // XXX debug
-    id: any = {id: crypto.randomUUID().substring(0, 7)};
-    toString() {
-        return "Edge[" + this.id.id + "]";
-    }
 
     constructor(start: Point, delta: DirectedVector, end: Point) {
         if (delta.value < 0)
@@ -111,12 +102,11 @@ class Edge {
         this.start = start;
         this.delta = delta;
         this.end = end;
-        // XXX debug
-        Object.defineProperties(this, {
-            start: {value: start, enumerable: true},
-            delta: {value: delta, enumerable: true},
-            end:   {value: end  , enumerable: true},
-        });
+        // Object.defineProperties(this, {
+        //     start: {value: start, enumerable: true},
+        //     delta: {value: delta, enumerable: true},
+        //     end:   {value: end  , enumerable: true},
+        // });
     }
 
     *[Symbol.iterator] (): Generator<Point, void, undefined> {
@@ -193,15 +183,11 @@ class Edge {
         let
             start = vertex_map(this.start),
             end = vertex_map(this.end);
-        // XXX debug: disabled old edge objects retaining
-        return new Edge(start, this.delta, end);
-
         if (start === this.start && end === this.end)
             return this;
         return new Edge(start, this.delta, end);
     }
 
-    // XXX debug
     static *debug_edge_generation(edges: Generator<Edge,void,undefined>):
         Generator<Edge,void,undefined>
     {
@@ -219,19 +205,16 @@ class Edge {
     }
 }
 
-type OrientedEdge = {
+export type OrientedEdge = {
     edge: Edge, index: number,
     start: Point, end: Point,
     forward: boolean, vector: DirectedVector,
 }
 
-class Polygon {
+export class Polygon {
     edges: Array<Edge>;
     size: number;
     vertices: Array<Point>;
-
-    // XXX debug
-    id: any = {id: crypto.randomUUID().substring(0, 7)};
 
     constructor(start: Point, edges: Array<Edge>) {
         this.edges = edges;
@@ -254,11 +237,6 @@ class Polygon {
             error.info = Object.assign({Polygon: {start, edges}}, error.info);
             throw error;
         }
-    }
-    /** This is the only modifying operation on Polygon.
-     * It only affects iteration order of its edges. */
-    rotate(new_start: Point) {
-
     }
 
     *[Symbol.iterator] (): Generator<Edge, void, undefined> {
@@ -474,7 +452,7 @@ class Polygon {
 
 }
 
-type GraphLike = {
+export type GraphLike = {
     vertices: Iterable<Point>,
     edges: Iterable<Edge>,
     faces: Iterable<Polygon>,
@@ -486,7 +464,7 @@ type EdgeSet = Array<Edge>;
  *  second is the right face. */
 type FaceSet = [Polygon | null, Polygon | null];
 
-class PlanarGraph {
+export class PlanarGraph {
     vertices: Set<Point>;
     edges: Set<Edge>;
     edgemap: Map<Point,EdgeSet>;
@@ -721,4 +699,13 @@ class PlanarGraph {
         }
     }
 }
+
+}
+
+import Direction = Graphs.Direction;
+import DirectedVector = Graphs.DirectedVector;
+import Point = Graphs.Point;
+import Edge = Graphs.Edge;
+import Polygon = Graphs.Polygon;
+import PlanarGraph = Graphs.PlanarGraph;
 

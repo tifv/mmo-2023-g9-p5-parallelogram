@@ -1,0 +1,21 @@
+{
+    "compilerOptions": {
+      "module": "None",
+      "target": "ES2020",
+      "strict": true,
+      "outDir": "build",
+      "outFile": "build/parallelogram.js",
+      "noImplicitAny": true,
+      "removeComments": false,
+      "noImplicitThis": true,
+    },
+    "files": [
+        "chooser.ts",
+        "common.ts",
+        "flow.ts",
+        "graph.ts",
+        "incut.ts",
+        "main.ts",
+        // "solver.ts",
+    ]
+  }
