@@ -1,7 +1,11 @@
 const EPSILON = 1e-7;
 
-function epsilon_sign(value: number): number {
-    return (value > EPSILON ? 1 : 0) - (value < -EPSILON ? 1 : 0);
+function epsilon_sign(value: number): 0 | 1 | -1 {
+    if (value > EPSILON)
+        return 1;
+    if (value < -EPSILON)
+        return -1;
+    return 0;
 }
 
 function modulo(a: number, n: number): number {

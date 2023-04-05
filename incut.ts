@@ -561,7 +561,7 @@ class Incutter {
                 .get(numeric_height(height)),
         ));
         if (start_preimage === undefined)
-            throw new Error("Unreachable");
+            throw new Error("unreachable");
         let [start, height] = start_preimage;
         return new Polygon(
             get_or_die(this.vertex_image_map, start)
