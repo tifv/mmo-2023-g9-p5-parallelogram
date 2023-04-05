@@ -16,6 +16,6 @@
         "graph.ts",
         "incut.ts",
         "main.ts",
-        // "solver.ts",
+        "solver.ts",
     ]
   }
