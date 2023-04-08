@@ -464,7 +464,7 @@ type EdgeSet = Array<Edge>;
  *  second is the right face. */
 type FaceSet = [Polygon | null, Polygon | null];
 
-export class PlanarGraph {
+export class PlanarGraph implements GraphLike {
     vertices: Set<Point>;
     edges: Set<Edge>;
     edgemap: Map<Point,EdgeSet>;
