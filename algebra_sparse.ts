@@ -124,7 +124,8 @@ class NumberArray {
     }
 
     set_value(index: number, value: number | null): void {
-        if (index < 0 || index >= this.size)
+        const {size} = this;
+        if (index < 0 || index >= size)
             throw new DimensionError();
         let {indices, values} = this;
         for (let j = this._start_i(index); true; ++j) {
@@ -615,19 +616,22 @@ export class Matrix {
         return this._zero_as(Matrix, width, height);
     }
 
-    eliminate_with(
-        eliminator: {
-            row: CoVector,
-            index: number,
-            value: number,
-            is_within?: boolean,
-        },
+    set_value(
+        row_index: number, col_index: number,
+        value: number | null,
     ): void {
-        for (let row of this.rows) {
-            if (eliminator.is_within && row == eliminator.row)
-                continue;
-            row.eliminate_with(eliminator);
-        }
+        if (row_index < 0 || row_index >= this.height)
+            throw new DimensionError();
+        this.rows[row_index].set_value(col_index, value);
+    }
+
+    add_value(
+        row_index: number, col_index: number,
+        value: number,
+    ): void {
+        if (row_index < 0 || row_index >= this.height)
+            throw new DimensionError();
+        this.rows[row_index].add_value(col_index, value);
     }
 
     add_from(
@@ -657,6 +661,21 @@ export class Matrix {
                 throw new DimensionError();
             this.rows[new_row_index].add_from(
                 matrix.rows[row_index], col_indices );
+        }
+    }
+
+    eliminate_with(
+        eliminator: {
+            row: CoVector,
+            index: number,
+            value: number,
+            is_within?: boolean,
+        },
+    ): void {
+        for (let row of this.rows) {
+            if (eliminator.is_within && row == eliminator.row)
+                continue;
+            row.eliminate_with(eliminator);
         }
     }
 
@@ -725,7 +744,7 @@ export class QuadraticMatrix extends Matrix {
             symmetrical: (jndex, increase) => {
                 if (jndex === elim_index)
                     return;
-                this.rows[jndex].add_value(elim_index, increase);
+                this.add_value(jndex, elim_index, increase);
             },
             eliminate_half: true,
         });
@@ -735,7 +754,7 @@ export class QuadraticMatrix extends Matrix {
                 symmetrical: (jndex, increase) => {
                     if (jndex === elim_index)
                         return;
-                    this.rows[jndex].add_value(index, increase);
+                    this.add_value(jndex, index, increase);
                 }
             });
         }

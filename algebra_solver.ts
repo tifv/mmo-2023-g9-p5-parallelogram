@@ -83,52 +83,32 @@ export class LPProblemSolver {
     }
 
     static solve_from_tokens(
-        {objective, target, constraints} : LPProblemTokenized,
+        {
+            objective: obj_tokens,
+            target,
+            constraints: cstr_tokens,
+        } : LPProblemTokenized,
     ): {error?: false, solution: {[name: string]: number}} | ErrorReport {
         let objective_expr =
-            Expression.AffineFunction.from_tokens(objective);
-        let constraints_rels = constraints.map( tokens =>
+            Expression.AffineFunction.from_tokens(obj_tokens);
+        let constraints_rels = cstr_tokens.map( tokens =>
             Expression.AffineRelation.from_tokens(tokens) );
         if (target === "max")
             objective_expr = objective_expr.negate();
-        let
-            variables = new Array<string>(),
-            variable_set = new Set<string>();
-        let add_variable = (variable: string) => {
-            if (!variable_set.has(variable)) {
-                variables.push(variable);
-                variable_set.add(variable);
-            }
-        }
-        for (let variable of objective_expr.get_variables()) {
-            add_variable(variable);
-        }
-        for (let constraint of constraints_rels) {
-            for (let variable of constraint.get_variables()) {
-                add_variable(variable);
-            }
-        }
-        let indices: {[name: string]: number} = {};
-        for (let [index, name] of variables.entries()) {
-            indices[name] = index;
-        }
-        let n = variables.length;
-        let sparse_constraints = constraints_rels
-            .map(constraint => constraint.as_sparse_covector(n, indices));
 
+        let matrix_builder: Expression.MaybeMatrixBuilder =
+            new Expression.MatrixBuilder();
+        matrix_builder.take_variables(objective_expr);
+        constraints_rels.forEach(rel => matrix_builder.take_variables(rel));
+        matrix_builder = matrix_builder.set_as_complete();
+        const n = matrix_builder.variable_count;
+
+        let {eq: constraints_eq, geq: constraints_geq} =
+            matrix_builder.make_relation_matrices(constraints_rels);
         let solution = LPProblemSolver.solve({
-            objective: objective_expr.as_sparse_covector(n, indices),
-            constraints_eq: new Matrix( n + 1,
-                sparse_constraints
-                    .filter(([,relation]) => relation === "eq")
-                    .map(([covector]) => covector),
-            ),
-            constraints_geq: new Matrix( n + 1,
-                sparse_constraints
-                    .filter(([,relation]) => relation === "geq")
-                    .map(([covector]) => covector),
-            ),
-        })
+            objective: matrix_builder.make_covector(objective_expr),
+            constraints_eq, constraints_geq,
+        });
         if (solution?.error) {
             return solution;
         }
@@ -136,8 +116,7 @@ export class LPProblemSolver {
             throw new Error("unreachable");
         }
         let successful = solution;
-        return {solution: Object.fromEntries(variables.map(
-            (name, index) => [name, successful.get_value(index)] ))};
+        return {solution: matrix_builder.unmake_vector(successful)};
     }
 
     constructor(
@@ -179,7 +158,7 @@ export class LPProblemSolver {
                     map: (index) => k + index,
                 });
                 for (let i = 0; i < k; ++i) {
-                    tableau.rows[i].add_value(i, 1);
+                    tableau.add_value(i, i, 1);
                 }
                 return tableau;
             })(),
