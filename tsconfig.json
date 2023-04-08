@@ -3,6 +3,7 @@
       "module": "None",
       "target": "ES2020",
       "strict": true,
+      "alwaysStrict": true,
       "outDir": "build",
       "outFile": "build/parallelogram.js",
       "noImplicitAny": true,
