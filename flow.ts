@@ -103,9 +103,9 @@ function find_flows(region: UncutRegion, flow_directions: FlowDirections): Flows
         constraints.c.x.push("+", direction.x, "*", var_c);
         constraints.c.y.push("+", direction.y, "*", var_c);
         objective.push(
-            "+", Chooser.choose_weight() - 0.5, "*", var_a,
-            "+", Chooser.choose_weight() - 0.5, "*", var_b,
-            "+", Chooser.choose_weight() - 0.5, "*", var_c,
+            "+", Chooser.choose_weight(), "*", var_a,
+            "+", Chooser.choose_weight(), "*", var_b,
+            "+", Chooser.choose_weight(), "*", var_c,
         );
         constraints.other.push(
             [var_a, "+", var_b, "+", var_c, "==", Math.abs(vector.value)],
