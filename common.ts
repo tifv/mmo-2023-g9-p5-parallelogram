@@ -202,17 +202,3 @@ class BiMap<K1,K2,V> extends Map<K1,Map<K2,V>> {
     }
 }
 
-type LPModel = {
-    optimize: any,
-    opType: any,
-    variables: {[x :string]: {[x: string]: number}},
-    constraints: { [x: string]:
-        {max?: number, min?: number, equal?: number}
-    },
-};
-
-function lpsolve(model: LPModel): { [s: string]: any; } {
-    // @ts-ignore
-    return solver.Solve(model);
-}
-

@@ -65,12 +65,19 @@ type Flows = Map<Direction, Flow>;
 
 function find_flows(region: UncutRegion, flow_directions: FlowDirections): Flows {
     let {sector_start, sector_end, vectors} = flow_directions;
-    var model: LPModel = {
-        optimize: "choice",
-        opType: "max",
-        constraints: {},
-        variables: {},
+    type Tokens = Algebra.Expression.Tokens;
+    let constraints: {
+        a: {x: Tokens, y: Tokens},
+        b: {x: Tokens, y: Tokens},
+        c: {x: Tokens, y: Tokens},
+        other: Array<Tokens>,
+    } = {
+        a: {x: [], y: []},
+        b: {x: [], y: []},
+        c: {x: [], y: []},
+        other: [],
     };
+    let objective: Tokens = [];
     var flow_params: Array<{
         k: number;
         var_a: string; var_b: string; var_c: string;
@@ -86,63 +93,65 @@ function find_flows(region: UncutRegion, flow_directions: FlowDirections): Flows
         }
         let
             var_base = "k" + i,
-            var_a = var_base + "_a",
-            var_b = var_base + "_b",
-            var_c = var_base + "_c",
-            var_len = var_base + "_len";
-        model.variables[var_a] = {
-            choice: Chooser.choose_weight(),
-            constr_a_x: direction.x,
-            constr_a_y: direction.y,
-            [var_len]: 1,
-        };
-        model.variables[var_b] = {
-            choice: Chooser.choose_weight(),
-            constr_b_x: direction.x,
-            constr_b_y: direction.y,
-            [var_len]: 1,
-        };
-        model.variables[var_c] = {
-            choice: Chooser.choose_weight(),
-            constr_c_x: direction.x,
-            constr_c_y: direction.y,
-            [var_len]: 1,
-        };
-        model.constraints[var_len] = {
-            equal: Math.abs(vector.value),
-        };
+            var_a = var_base + ".a",
+            var_b = var_base + ".b",
+            var_c = var_base + ".c";
+        constraints.a.x.push("+", direction.x, "*", var_a);
+        constraints.a.y.push("+", direction.y, "*", var_a);
+        constraints.b.x.push("+", direction.x, "*", var_b);
+        constraints.b.y.push("+", direction.y, "*", var_b);
+        constraints.c.x.push("+", direction.x, "*", var_c);
+        constraints.c.y.push("+", direction.y, "*", var_c);
+        objective.push(
+            "+", Chooser.choose_weight() - 0.5, "*", var_a,
+            "+", Chooser.choose_weight() - 0.5, "*", var_b,
+            "+", Chooser.choose_weight() - 0.5, "*", var_c,
+        );
+        constraints.other.push(
+            [var_a, "+", var_b, "+", var_c, "==", Math.abs(vector.value)],
+            [var_a, ">=", 0], [var_b, ">=", 0], [var_c, ">=", 0],
+        );
         flow_params[i] = {k, var_a, var_b, var_c};
     }
-    let
-        {x: constr_a_x, y: constr_a_y} = Graphs.Vector.from_points(
-            sector_start, region.points1[0] ),
-        {x: constr_b_x, y: constr_b_y} = Graphs.Vector.from_points(
-            region.points1[1], region.points2[0] ),
-        {x: constr_c_x, y: constr_c_y} = Graphs.Vector.from_points(
+    {
+        let {x, y} = Graphs.Vector.from_points(
+            sector_start, region.points1[0] );
+        constraints.a.x.push("==", x);
+        constraints.a.y.push("==", y);
+    }
+    {
+        let {x, y} = Graphs.Vector.from_points(
+            region.points1[1], region.points2[0] );
+        constraints.b.x.push("==", x);
+        constraints.b.y.push("==", y);
+    }
+    {
+        let {x, y} = Graphs.Vector.from_points(
             region.points2[1], sector_end );
-    Object.assign(model.constraints, {
-        constr_a_x: {equal: constr_a_x},
-        constr_a_y: {equal: constr_a_y},
-        constr_b_x: {equal: constr_b_x},
-        constr_b_y: {equal: constr_b_y},
-        constr_c_x: {equal: constr_c_x},
-        constr_c_y: {equal: constr_c_y},
-    });
+        constraints.c.x.push("==", x);
+        constraints.c.y.push("==", y);
+    }
 
-    var results = lpsolve(model);
-    if (!results.feasible) {
+    var result = Algebra.Solver.LPProblemSolver.solve_from_tokens({
+        objective: objective,
+        target: "min",
+        constraints: [
+            constraints.a.x, constraints.a.y,
+            constraints.b.x, constraints.b.y,
+            constraints.c.x, constraints.c.y,
+            ...constraints.other,
+        ],
+    })
+    if (result.error) {
         let error: any = new ImpossibleFlowError("Cannot find flow");
-        error.info = {find_flows: {uncut_region: region, model, results}};
+        error.info = {find_flows: { uncut_region: region,
+            objective, constraints, result }};
         throw error;
     }
     var flows: Flows = new Map();
     for (let [i, vector] of vectors.entries()) {
         let {k, var_a, var_b, var_c} = flow_params[i];
-        let
-            a: number,
-            b: number,
-            c: number;
-        ({[var_a]: a = 0, [var_b]: b = 0, [var_c]: c = 0} = results);
+        let {[var_a]: a = 0, [var_b]: b = 0, [var_c]: c = 0} = result.solution;
         flows.set( vector.direction,
             {a: a*k, b: b*k, c: c*k, sum: (a+b+c)*k} );
     }

@@ -10,6 +10,14 @@ import QuadraticMatrix = Algebra.Sparse.QuadraticMatrix;
 type Solution = Vector;
 type ErrorReport = {error: true, description: string};
 
+import Tokens = Algebra.Expression.Tokens;
+
+export type LPProblemTokenized = {
+    objective: Tokens,
+    target: "min" | "max",
+    constraints: Array<Tokens>,
+}
+
 export class LPProblemSolver {
     n: number;
     k: number;
@@ -75,14 +83,14 @@ export class LPProblemSolver {
     }
 
     static solve_from_tokens(
-        objective: Expression.Token[],
-        target: "min",
-        constraints: Array<Expression.Token[]>,
+        {objective, target, constraints} : LPProblemTokenized,
     ): {error?: false, solution: {[name: string]: number}} | ErrorReport {
         let objective_expr =
             Expression.AffineFunction.from_tokens(objective);
         let constraints_rels = constraints.map( tokens =>
             Expression.AffineRelation.from_tokens(tokens) );
+        if (target === "max")
+            objective_expr = objective_expr.negate();
         let
             variables = new Array<string>(),
             variable_set = new Set<string>();
@@ -407,57 +415,3 @@ export class LPProblemSolver {
 
 } // end namespace
 
-
-// replacement for js-lp-solver
-var solver = {
-Solve: function Solve(model: LPModel): { [s: string]: any; } {
-    type Token = Algebra.Expression.Token;
-    let objective: Token[] = [model.optimize];
-    if (model.opType === "max") {
-        objective = [-1, "*", "(", ...objective, ")"];
-    } else if (model.opType !== "min") {
-        throw new Error("unknown opType " + model.opType);
-    }
-    let constraints: Array<Token[]> = [];
-    let constraint_map: {[name: string]: {[name: string]: number}} = {};
-    for (let [var_name, coefficients] of Object.entries(model.variables)) {
-        for (let [constr_name, coefficient] of Object.entries(coefficients)) {
-            let constraint_coeffs = constraint_map[constr_name];
-            if (constraint_coeffs === undefined)
-                constraint_coeffs = constraint_map[constr_name] = {};
-            constraint_coeffs[var_name] = coefficient;
-        }
-        constraints.push([var_name, ">=", 0]);
-    }
-    for (let [constr_name, constr_map] of Object.entries(constraint_map)) {
-        let expression: Token[] = [];
-        for (let [var_name, coefficient] of Object.entries(constr_map))
-        {
-            expression.push("+", coefficient, "*", var_name);
-        }
-        constraints.push([constr_name, "==", ...expression]);
-        let constr_limits = model.constraints[constr_name];
-        if (constr_limits === undefined)
-            continue;
-        if (constr_limits.equal !== undefined) {
-            constraints.push([constr_name, "==", constr_limits.equal]);
-            continue;
-        }
-        if (constr_limits.max !== undefined) {
-            constraints.push([constr_name, "<=", constr_limits.max]);
-        }
-        if (constr_limits.min !== undefined) {
-            constraints.push([constr_name, ">=", constr_limits.min]);
-        }
-    }
-    let solution = Algebra.Solver.LPProblemSolver.solve_from_tokens(
-        objective,
-        "min",
-        constraints,
-    );
-    if (solution.error) {
-        return Object.assign({feasible: false}, solution);
-    }
-    return Object.assign({feasible: true}, solution.solution);
-}
-}
