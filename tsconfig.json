@@ -1,22 +1,27 @@
 {
-    "compilerOptions": {
-      "module": "None",
-      "target": "ES2020",
-      "strict": true,
-      "alwaysStrict": true,
-      "outDir": "build",
-      "outFile": "build/parallelogram.js",
-      "noImplicitAny": true,
-      "removeComments": false,
-      "noImplicitThis": true,
-    },
-    "files": [
-        "chooser.ts",
-        "common.ts",
-        "flow.ts",
-        "graph.ts",
-        "incut.ts",
-        "main.ts",
-        "solver.ts",
-    ]
-  }
+  "compilerOptions": {
+    "module": "None",
+    "target": "ES2020",
+    "strict": true,
+    "alwaysStrict": true,
+    "outDir": "build",
+    "outFile": "build/parallelogram.js",
+    "noImplicitAny": true,
+    "removeComments": false,
+    "noImplicitThis": true,
+    "declaration": false,
+    "sourceMap": true,
+    "sourceRoot": "/src/",
+  },
+  "files": [
+    "chooser.ts",
+    "common.ts",
+    "algebra_expr.ts",
+    "algebra_sparse.ts",
+    "algebra_solver.ts",
+    "graph.ts",
+    "flow.ts",
+    "incut.ts",
+    "main.ts",
+  ]
+}
