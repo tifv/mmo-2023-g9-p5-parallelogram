@@ -2,61 +2,185 @@ namespace Algebra {
 
 export namespace Expression {
 
+
 export type Token = string | number;
 export type Tokens = Array<Token>;
 
-const enum ExprLevel {
+
+enum NodeLevel {
     GROUP = 10,
     REL = 20,
     ADD = 30,
     MUL = 40,
     UNARY = 50,
 };
-const enum Operation {
+enum Operation {
     GEQ = 20,
     LEQ = 21,
-    XEQ = 22,
+    EQ = 22,
     ADD = 30,
     SUB = 31,
     MUL = 40,
     DIV = 41,
 };
-type RelOp = Operation.GEQ | Operation.LEQ | Operation.XEQ;
+type RelOp = Operation.GEQ | Operation.LEQ | Operation.EQ;
 type AddOp = Operation.ADD | Operation.SUB;
 type MulOp = Operation.MUL | Operation.DIV;
 type UnaryOp = AddOp;
 
+
+const NODE_TYPE = Symbol();
+type ASTNode = (
+    ASTExpression | ASTRelation
+);
+
+class ASTExpressionClass {
+    get [NODE_TYPE](): "expression" { return "expression"; }
+};
+
+class ASTRelationClass {
+    get [NODE_TYPE](): "relation" { return "relation"; }
+}
+
+const EXPR_TYPE = Symbol();
+type ASTExpression = (
+    ASTConstant | ASTVariable | ASTUnary | ASTBinary
+);
+
+class ASTConstant extends ASTExpressionClass {
+    get [EXPR_TYPE](): "constant" { return "constant"; }
+    value: number;
+    constructor(value: number) {
+        super();
+        this.value = value;
+    }
+}
+
+class ASTVariable extends ASTExpressionClass {
+    get [EXPR_TYPE](): "variable" { return "variable"; }
+    name: string;
+    constructor(name: string) {
+        super();
+        this.name = name;
+    }
+}
+
+class ASTUnaryBase extends ASTExpressionClass {
+    get [EXPR_TYPE](): "unary" { return "unary"; }
+    value: ASTExpression;
+    constructor(value: ASTNode) {
+        super();
+        if (value[NODE_TYPE] !== "expression")
+            throw new Error("Unary operator applied to a non-expression.");
+        this.value = value;
+    }
+}
+
+class ASTBinaryClass extends ASTExpressionClass {
+    get [EXPR_TYPE](): "binary" { return "binary"; }
+    left: ASTExpression;
+    right: ASTExpression;
+    constructor(left: ASTNode, right: ASTNode) {
+        super();
+        if (
+            left [NODE_TYPE] !== "expression" ||
+            right[NODE_TYPE] !== "expression"
+        )
+            throw new Error("Binary operator applied to a non-expression.");
+        this.left = left;
+        this.right = right;
+    }
+}
+
+const OPERATION = Symbol();
+
+type ASTUnary = ASTNeg;
+
+class ASTNeg extends ASTUnaryBase {
+    get [OPERATION](): Operation.SUB { return Operation.SUB; }
+}
+
+type ASTBinary = ASTAdd | ASTSub | ASTMul | ASTDiv;
+
+class ASTAdd extends ASTBinaryClass {
+    get [OPERATION](): Operation.ADD { return Operation.ADD; }
+};
+class ASTSub extends ASTBinaryClass {
+    get [OPERATION](): Operation.SUB { return Operation.SUB; }
+};
+
+class ASTMul extends ASTBinaryClass {
+    get [OPERATION](): Operation.MUL { return Operation.MUL; }
+};
+class ASTDiv extends ASTBinaryClass {
+    get [OPERATION](): Operation.DIV { return Operation.DIV; }
+};
+
+
+const REL_TYPE = Symbol();
+type ASTRelation = ASTBinaryRelation;
+
+class ASTBinaryRelationClass extends ASTRelationClass {
+    get [REL_TYPE](): "binary" { return "binary"; }
+    left: ASTExpression;
+    right: ASTExpression;
+    constructor(left: ASTNode, right: ASTNode) {
+        super();
+        if (
+            left[NODE_TYPE] !== "expression" ||
+            right[NODE_TYPE] !== "expression"
+        )
+            throw new Error("Relation applied to a non-expression.");
+        this.left = left;
+        this.right = right;
+    }
+}
+
+
+type ASTBinaryRelation = ASTGEq | ASTLEq | ASTEq;
+
+class ASTGEq extends ASTBinaryRelationClass {
+    get [OPERATION](): Operation.GEQ { return Operation.GEQ; }
+};
+class ASTLEq extends ASTBinaryRelationClass {
+    get [OPERATION](): Operation.LEQ { return Operation.LEQ; }
+};
+class ASTEq extends ASTBinaryRelationClass {
+    get [OPERATION](): Operation.EQ  { return Operation.EQ; }
+};
+
+
 function parse_tokens(tokens: Tokens): ASTNode {
     type Context = (
-        {level: ExprLevel.GROUP, node: null, op: null} |
-        {level: ExprLevel.REL, node: ASTNode, op: RelOp | null} |
-        {level: ExprLevel.ADD, node: ASTNode, op: AddOp | null} |
-        {level: ExprLevel.MUL, node: ASTNode, op: MulOp | null} |
-        {level: ExprLevel.UNARY, node: null, op: UnaryOp}
+        {level: NodeLevel.GROUP, node: null, op: null} |
+        {level: NodeLevel.REL, node: ASTNode, op: RelOp | null} |
+        {level: NodeLevel.ADD, node: ASTNode, op: AddOp | null} |
+        {level: NodeLevel.MUL, node: ASTNode, op: MulOp | null} |
+        {level: NodeLevel.UNARY, node: null, op: UnaryOp}
     );
 
     let contexts: Array<Context> = new Array();
-    contexts.push({level: ExprLevel.GROUP, node: null, op: null})
+    contexts.push({level: NodeLevel.GROUP, node: null, op: null})
     let reduce_to_mul = (context: Context): Context & (
-        {level: ExprLevel.GROUP} |
-        {level: ExprLevel.REL} |
-        {level: ExprLevel.ADD} |
-        {level: ExprLevel.MUL}
+        {level: NodeLevel.GROUP} |
+        {level: NodeLevel.REL} |
+        {level: NodeLevel.ADD} |
+        {level: NodeLevel.MUL}
     ) => {
         let unary_context = context;
-        if (unary_context.level === ExprLevel.GROUP)
+        if (unary_context.level === NodeLevel.GROUP)
             return unary_context;
-        if (unary_context.level === ExprLevel.REL) {
+        if (unary_context.level === NodeLevel.REL) {
             if (unary_context.op !== null)
                 throw new Error("Relation not followed by anything");
             return unary_context;
         }
-        if (unary_context.level === ExprLevel.ADD) {
+        if (unary_context.level === NodeLevel.ADD) {
             if (unary_context.op !== null)
                 throw new Error("Operator not followed by anything");
             return unary_context;
         }
-        if (unary_context.level === ExprLevel.MUL) {
+        if (unary_context.level === NodeLevel.MUL) {
             if (unary_context.op !== null)
                 throw new Error("Operator not followed by anything");
             return unary_context;
@@ -64,19 +188,19 @@ function parse_tokens(tokens: Tokens): ASTNode {
         throw new Error("Operator not followed by anything");
     }
     let reduce_to_add = (context: Context): Context & (
-        {level: ExprLevel.GROUP} |
-        {level: ExprLevel.REL} |
-        {level: ExprLevel.ADD}
+        {level: NodeLevel.GROUP} |
+        {level: NodeLevel.REL} |
+        {level: NodeLevel.ADD}
     ) => {
         let mul_context = reduce_to_mul(context);
-        if (mul_context.level === ExprLevel.GROUP)
+        if (mul_context.level === NodeLevel.GROUP)
             return mul_context;
-        if (mul_context.level === ExprLevel.REL) {
+        if (mul_context.level === NodeLevel.REL) {
             if (mul_context.op !== null)
                 throw new Error("Relation not followed by anything");
             return mul_context;
         }
-        if (mul_context.level === ExprLevel.ADD) {
+        if (mul_context.level === NodeLevel.ADD) {
             if (mul_context.op !== null)
                 throw new Error("Operator not followed by anything");
             return mul_context;
@@ -86,9 +210,9 @@ function parse_tokens(tokens: Tokens): ASTNode {
             throw new Error("Operator not followed by anything");
         contexts.shift();
         [context] = contexts;
-        if (context.level !== ExprLevel.ADD) {
-            let add_context: Context & {level: ExprLevel.ADD} =
-                {level: ExprLevel.ADD, node, op: null};
+        if (context.level !== NodeLevel.ADD) {
+            let add_context: Context & {level: NodeLevel.ADD} =
+                {level: NodeLevel.ADD, node, op: null};
             contexts.unshift(add_context);
             return add_context;
         }
@@ -103,20 +227,20 @@ function parse_tokens(tokens: Tokens): ASTNode {
                 add_node = new ASTSub(context.node, node);
                 break;
         }
-        let add_context: Context & {level: ExprLevel.ADD} =
-            {level: ExprLevel.ADD, node: add_node, op: null};
+        let add_context: Context & {level: NodeLevel.ADD} =
+            {level: NodeLevel.ADD, node: add_node, op: null};
         contexts.shift();
         contexts.unshift(add_context);
         return add_context;
     }
     let reduce_to_rel = (context: Context): Context & (
-        {level: ExprLevel.GROUP} |
-        {level: ExprLevel.REL}
+        {level: NodeLevel.GROUP} |
+        {level: NodeLevel.REL}
     ) => {
         let add_context = reduce_to_add(context);
-        if (add_context.level === ExprLevel.GROUP)
+        if (add_context.level === NodeLevel.GROUP)
             return add_context;
-        if (add_context.level === ExprLevel.REL) {
+        if (add_context.level === NodeLevel.REL) {
             if (add_context.op !== null)
                 throw new Error("Relation not followed by anything");
             return add_context;
@@ -126,9 +250,9 @@ function parse_tokens(tokens: Tokens): ASTNode {
             throw new Error("Operator not followed by anything");
         contexts.shift();
         [context] = contexts;
-        if (context.level !== ExprLevel.REL) {
-            let rel_context: Context & {level: ExprLevel.REL} =
-                {level: ExprLevel.REL, node, op: null};
+        if (context.level !== NodeLevel.REL) {
+            let rel_context: Context & {level: NodeLevel.REL} =
+                {level: NodeLevel.REL, node, op: null};
             contexts.unshift(rel_context);
             return rel_context;
         }
@@ -142,12 +266,12 @@ function parse_tokens(tokens: Tokens): ASTNode {
             case Operation.LEQ:
                 rel_node = new ASTLEq(context.node, node);
                 break;
-            case Operation.XEQ:
+            case Operation.EQ:
                 rel_node = new ASTEq(context.node, node);
                 break;
         }
-        let rel_context: Context & {level: ExprLevel.REL} =
-            {level: ExprLevel.REL, node: rel_node, op: null};
+        let rel_context: Context & {level: NodeLevel.REL} =
+            {level: NodeLevel.REL, node: rel_node, op: null};
         contexts.shift();
         contexts.unshift(rel_context);
         return rel_context;
@@ -159,33 +283,33 @@ function parse_tokens(tokens: Tokens): ASTNode {
         switch (token) {
             case ">=": {
                 let rel_context = reduce_to_rel(context);
-                if (rel_context.level === ExprLevel.GROUP)
+                if (rel_context.level === NodeLevel.GROUP)
                     throw new Error("Relation not preceded by anything")
                 rel_context.op = Operation.GEQ;
                 continue iterate_tokens;
             }
             case "<=": {
                 let rel_context = reduce_to_rel(context);
-                if (rel_context.level === ExprLevel.GROUP)
+                if (rel_context.level === NodeLevel.GROUP)
                     throw new Error("Relation not preceded by anything")
                 rel_context.op = Operation.LEQ;
                 continue iterate_tokens;
             }
             case "==": {
                 let rel_context = reduce_to_rel(context);
-                if (rel_context.level === ExprLevel.GROUP)
+                if (rel_context.level === NodeLevel.GROUP)
                     throw new Error("Relation not preceded by anything")
-                rel_context.op = Operation.XEQ;
+                rel_context.op = Operation.EQ;
                 continue iterate_tokens;
             }
             case "+" : {
                 if (
-                    context.level === ExprLevel.GROUP ||
-                    context.level === ExprLevel.REL ||
+                    context.level === NodeLevel.GROUP ||
+                    context.level === NodeLevel.REL ||
                     context.op !== null
                 ) {
                     contexts.unshift({
-                        level: ExprLevel.UNARY,
+                        level: NodeLevel.UNARY,
                         node: null,
                         op: Operation.ADD,
                     });
@@ -193,20 +317,20 @@ function parse_tokens(tokens: Tokens): ASTNode {
                 }
                 let add_context = reduce_to_add(context);
                 if (
-                    add_context.level === ExprLevel.GROUP ||
-                    add_context.level === ExprLevel.REL )
+                    add_context.level === NodeLevel.GROUP ||
+                    add_context.level === NodeLevel.REL )
                     throw new Error("Operation not preceded by anything")
                 add_context.op = Operation.ADD;
                 continue iterate_tokens;
             }
             case "-" : {
                 if (
-                    context.level === ExprLevel.GROUP ||
-                    context.level === ExprLevel.REL ||
+                    context.level === NodeLevel.GROUP ||
+                    context.level === NodeLevel.REL ||
                     context.op !== null
                 ) {
                     contexts.unshift({
-                        level: ExprLevel.UNARY,
+                        level: NodeLevel.UNARY,
                         node: null,
                         op: Operation.SUB,
                     });
@@ -214,8 +338,8 @@ function parse_tokens(tokens: Tokens): ASTNode {
                 }
                 let add_context = reduce_to_add(context);
                 if (
-                    add_context.level === ExprLevel.GROUP ||
-                    add_context.level === ExprLevel.REL )
+                    add_context.level === NodeLevel.GROUP ||
+                    add_context.level === NodeLevel.REL )
                     throw new Error("Operation not preceded by anything")
                 add_context.op = Operation.SUB;
                 continue iterate_tokens;
@@ -223,9 +347,9 @@ function parse_tokens(tokens: Tokens): ASTNode {
             case "*" : {
                 let mul_context = reduce_to_mul(context);
                 if (
-                    mul_context.level === ExprLevel.GROUP ||
-                    mul_context.level === ExprLevel.REL ||
-                    mul_context.level === ExprLevel.ADD )
+                    mul_context.level === NodeLevel.GROUP ||
+                    mul_context.level === NodeLevel.REL ||
+                    mul_context.level === NodeLevel.ADD )
                     throw new Error("Operation not preceded by anything")
                 mul_context.op = Operation.MUL;
                 continue iterate_tokens;
@@ -233,26 +357,26 @@ function parse_tokens(tokens: Tokens): ASTNode {
             case "/" : {
                 let mul_context = reduce_to_mul(context);
                 if (
-                    mul_context.level === ExprLevel.GROUP ||
-                    mul_context.level === ExprLevel.REL ||
-                    mul_context.level === ExprLevel.ADD )
+                    mul_context.level === NodeLevel.GROUP ||
+                    mul_context.level === NodeLevel.REL ||
+                    mul_context.level === NodeLevel.ADD )
                     throw new Error("Operation not preceded by anything")
                 mul_context.op = Operation.DIV;
                 continue iterate_tokens;
             }
             case "(" : switch (context.level) {
-                case ExprLevel.GROUP:
-                    contexts.unshift({ level: ExprLevel.GROUP,
+                case NodeLevel.GROUP:
+                    contexts.unshift({ level: NodeLevel.GROUP,
                         node: null, op: null });
                     continue iterate_tokens;
-                case ExprLevel.REL:
-                case ExprLevel.ADD:
-                case ExprLevel.MUL:
-                case ExprLevel.UNARY:
+                case NodeLevel.REL:
+                case NodeLevel.ADD:
+                case NodeLevel.MUL:
+                case NodeLevel.UNARY:
                     if (context.op === null)
                         throw new Error(
                             "Value is not preceded by operation" )
-                    contexts.unshift({ level: ExprLevel.GROUP,
+                    contexts.unshift({ level: NodeLevel.GROUP,
                         node: null, op: null });
                     continue iterate_tokens;
                 default:
@@ -260,13 +384,13 @@ function parse_tokens(tokens: Tokens): ASTNode {
             }
             case ")" : {
                 let rel_context = reduce_to_rel(context);
-                if (rel_context.level === ExprLevel.GROUP)
+                if (rel_context.level === NodeLevel.GROUP)
                     throw new Error("Empty parentheses pair");
                 contexts.shift();
                 let opening_context = contexts.shift();
                 if (opening_context === undefined || contexts.length === 0)
                     throw new Error("Unmatched closing parenthesis");
-                if (opening_context.level !== ExprLevel.GROUP)
+                if (opening_context.level !== NodeLevel.GROUP)
                     throw new Error("unreachable");
                 value = rel_context.node;
                 [context] = contexts;
@@ -282,30 +406,30 @@ function parse_tokens(tokens: Tokens): ASTNode {
         }
         while (value !== null) {
             switch (context.level) {
-                case ExprLevel.GROUP:
-                    contexts.unshift({ level: ExprLevel.MUL,
+                case NodeLevel.GROUP:
+                    contexts.unshift({ level: NodeLevel.MUL,
                         node: value, op: null });
                     continue iterate_tokens;
-                case ExprLevel.REL:
-                case ExprLevel.ADD:
+                case NodeLevel.REL:
+                case NodeLevel.ADD:
                     if (context.op === null)
                         throw new Error(
                             "Value is not preceded by operation" )
-                    contexts.unshift({ level: ExprLevel.MUL,
+                    contexts.unshift({ level: NodeLevel.MUL,
                         node: value, op: null });
                     continue iterate_tokens;
-                case ExprLevel.MUL: switch(context.op) {
+                case NodeLevel.MUL: switch(context.op) {
                     case null:
                         throw new Error(
                             "Value is not preceded by operation" )
                     case Operation.MUL:
                         contexts.shift();
-                        contexts.unshift({ level: ExprLevel.MUL, op: null,
+                        contexts.unshift({ level: NodeLevel.MUL, op: null,
                             node: new ASTMul(context.node, value) });
                         continue iterate_tokens;
                     case Operation.DIV:
                         contexts.shift();
-                        contexts.unshift({ level: ExprLevel.MUL, op: null,
+                        contexts.unshift({ level: NodeLevel.MUL, op: null,
                             node: new ASTDiv(context.node, value) });
                         continue iterate_tokens;
                     default:
@@ -335,101 +459,10 @@ function parse_tokens(tokens: Tokens): ASTNode {
     if (contexts.length < 1) {
         throw new Error("unreachable");
     }
-    if (rel_context.level === ExprLevel.GROUP)
+    if (rel_context.level === NodeLevel.GROUP)
         throw new Error("Empty expression");
     return rel_context.node;
 }
-
-const EXPR_TYPE = Symbol();
-
-type ASTNode = ASTExpression | ASTRelation;
-
-type ASTExpression = (
-    ASTConstant | ASTVariable | ASTUnary | ASTBinary
-) & {[EXPR_TYPE]: "expression"};
-
-class ASTExpressionClass {
-    get [EXPR_TYPE](): "expression" {
-        return "expression";
-    }
-};
-
-class ASTConstant extends ASTExpressionClass {
-    value: number;
-    constructor(value: number) {
-        super();
-        this.value = value;
-    }
-}
-
-class ASTVariable extends ASTExpressionClass {
-    name: string;
-    constructor(name: string) {
-        super();
-        this.name = name;
-    }
-}
-
-type ASTUnary = ASTNeg;
-class ASTUnaryBase extends ASTExpressionClass {
-    value: ASTExpression;
-    constructor(value: ASTNode) {
-        super();
-        if (!(value instanceof ASTExpressionClass))
-            throw new Error("Unary operator applied to non-expression.");
-        this.value = value;
-    }
-}
-
-class ASTNeg extends ASTUnaryBase {}
-
-type ASTBinary = ASTAdd | ASTSub | ASTMul | ASTDiv;
-class ASTBinaryBase extends ASTExpressionClass {
-    left: ASTExpression;
-    right: ASTExpression;
-    constructor(left: ASTNode, right: ASTNode) {
-        super();
-        if (
-            !(left instanceof ASTExpressionClass) ||
-            !(right instanceof ASTExpressionClass)
-        )
-            throw new Error("Binary operator applied to non-expressions.");
-        this.left = left;
-        this.right = right;
-    }
-}
-
-class ASTAdd extends ASTBinaryBase {};
-class ASTSub extends ASTBinaryBase {};
-
-class ASTMul extends ASTBinaryBase {};
-class ASTDiv extends ASTBinaryBase {};
-
-type ASTRelation = (
-    ASTGEq | ASTLEq | ASTEq
-) & {[EXPR_TYPE]: "relation"};
-
-class ASTRelationClass {
-    get [EXPR_TYPE](): "relation" {
-        return "relation";
-    }
-
-    left: ASTExpression;
-    right: ASTExpression;
-    constructor(left: ASTNode, right: ASTNode) {
-        if (
-            !(left instanceof ASTExpressionClass) ||
-            !(right instanceof ASTExpressionClass)
-        )
-            throw new Error("Relation applied to non-expressions.");
-        this.left = left;
-        this.right = right;
-    }
-}
-
-class ASTGEq extends ASTRelationClass {};
-class ASTLEq extends ASTRelationClass {};
-class ASTEq extends ASTRelationClass {};
 
 export class AffineFunction {
     coefficients: {[name: string]: number}
@@ -473,24 +506,30 @@ export class AffineFunction {
     }
 
     static from_ast(ast: ASTExpression): AffineFunction {
-        if (ast instanceof ASTConstant) {
+        if (ast[EXPR_TYPE] === "constant") {
             return new AffineFunction({}, ast.value);
         }
-        if (ast instanceof ASTVariable) {
+        if (ast[EXPR_TYPE] === "variable") {
             return new AffineFunction({[ast.name]: 1}, 0);
         }
-        if (ast instanceof ASTAdd) {
+        if (ast[EXPR_TYPE] === "unary") {
+            if (ast[OPERATION] !== Operation.SUB) {
+                throw new Error("Unknown AST node type");
+            }
+            return this.from_ast(ast.value).negate();
+        }
+        if (ast[EXPR_TYPE] !== "binary") {
+            throw new Error("Unknown AST node type");
+        }
+        if (ast[OPERATION] === Operation.ADD) {
             return this.from_ast(ast.left).plus(
                 this.from_ast(ast.right) );
         }
-        if (ast instanceof ASTSub) {
+        if (ast[OPERATION] === Operation.SUB) {
             return this.from_ast(ast.left).plus(
                 this.from_ast(ast.right).negate() );
         }
-        if (ast instanceof ASTNeg) {
-            return this.from_ast(ast.value).negate();
-        }
-        if (ast instanceof ASTMul) {
+        if (ast[OPERATION] === Operation.MUL) {
             let
                 left = this.from_ast(ast.left),
                 right = this.from_ast(ast.right);
@@ -505,7 +544,7 @@ export class AffineFunction {
             }
             throw new Error("Cannot build any quadratic expression");
         }
-        if (ast instanceof ASTDiv) {
+        if (ast[OPERATION] === Operation.DIV) {
             let
                 left = this.from_ast(ast.left),
                 right = this.from_ast(ast.right);
@@ -519,12 +558,12 @@ export class AffineFunction {
             }
             return left.scale(1 / right_const);
         }
-        throw new Error("Unrecognized AST expression node");
+        throw new Error("Unknown AST node type");
     }
 
     static from_tokens(tokens: Tokens): AffineFunction {
         let ast = parse_tokens(tokens);
-        if (!(ast instanceof ASTExpressionClass))
+        if (ast[NODE_TYPE] !== "expression")
             throw new Error("Can only parse an expression");
         return this.from_ast(ast);
     }
@@ -570,31 +609,31 @@ export class AffineRelation {
         return new AffineRelation(left.plus(right.negate()), relation);
     }
 
-    static from_ast(ast: ASTRelationClass): AffineRelation {
-        if (ast instanceof ASTGEq) {
+    static from_ast(ast: ASTRelation): AffineRelation {
+        if (ast[OPERATION] === Operation.GEQ) {
             let
                 left = AffineFunction.from_ast(ast.left),
                 right = AffineFunction.from_ast(ast.right);
             return new AffineRelation(left.plus(right.negate()), "geq");
         }
-        if (ast instanceof ASTLEq) {
+        if (ast[OPERATION] === Operation.LEQ) {
             let
                 left = AffineFunction.from_ast(ast.left),
                 right = AffineFunction.from_ast(ast.right);
             return new AffineRelation(left.plus(right.negate()), "leq");
         }
-        if (ast instanceof ASTEq) {
+        if (ast[OPERATION] === Operation.EQ) {
             let
                 left = AffineFunction.from_ast(ast.left),
                 right = AffineFunction.from_ast(ast.right);
             return new AffineRelation(left.plus(right.negate()), "eq");
         }
-        throw new Error("Unrecognized AST node");
+        throw new Error("Unknown AST node type");
     }
 
     static from_tokens(tokens: Tokens): AffineRelation {
         let ast = parse_tokens(tokens)
-        if (!(ast instanceof ASTRelationClass))
+        if (!(ast[NODE_TYPE] === "relation"))
             throw new Error("Can only parse a relation");
         return this.from_ast(ast);
     }
