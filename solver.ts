@@ -1,1008 +1,5 @@
 namespace Algebra {
 
-/** n is number of rows, m is number of columns */
-type Matrix<V> = Array<V> & {n: number, m: number};
-/** n is number of elements/rows */
-type Vector<V> = Array<V> & {n: number, m: 1};
-/** m is number of elements/columns */
-type CoVector<V> = Array<V> & {n: 1, m: number};
-
-function new_matrix<V>(n: number, m: 1, fill?: V): Vector<V>
-function new_matrix<V>(n: 1, m: number, fill?: V): CoVector<V>
-function new_matrix<V>(n: number, m: number, fill?: V): Matrix<V>
-function new_matrix<V>(n: number, m: number, fill?: V): Matrix<V> {
-    let matrix = Object.assign(new Array<V>(n*m), {n, m});
-    if (fill !== undefined) {
-        matrix.fill(fill);
-    }
-    return matrix;
-}
-
-function copy_matrix<V>(matrix: Vector<V>): Vector<V>
-function copy_matrix<V>(matrix: CoVector<V>): CoVector<V>
-function copy_matrix<V>(matrix: Matrix<V>): Matrix<V>
-function copy_matrix<V>(matrix: Matrix<V>): Matrix<V> {
-    const {n, m} = matrix;
-    let copy = Object.assign(new Array<V>(), {n, m});
-    copy.push(...matrix);
-    return copy;
-}
-
-function transpose<V>(matrix: Vector<V>): CoVector<V>
-function transpose<V>(matrix: CoVector<V>): Vector<V>
-function transpose<V>(matrix: Matrix<V>): Matrix<V>
-function transpose<V>(matrix: Matrix<V>): Matrix<V> {
-    const {n, m} = matrix;
-    if (matrix.n == 1) {
-        return Object.assign(
-            Array.from(matrix), {n: m, m: 1} );
-    }
-    if (matrix.m == 1) {
-        return Object.assign(
-            Array.from(matrix), {n: 1, m: n} );
-    }
-    let transposed = new_matrix<V>(m, n);
-    for (let i = 0; i < n; ++i) {
-        for (let j = 0; j < m; ++j) {
-            transposed[j*n+j] = matrix[i*m+j];
-        }
-    }
-    return transposed;
-}
-
-function apply(covector: CoVector<number>, vector: Vector<number>): number {
-    if (covector.m != vector.n) {
-        throw new Error("Vector sizes do not match");
-    }
-    return covector.reduce((sum, y, i) => sum + y * vector[i], 0);
-}
-
-type Constraint = {
-    covector: CoVector<number>,
-    type: "eq",
-    value: number,
-} | {
-    covector: CoVector<number>,
-    type: "geq",
-    value: number,
-};
-
-class GaussianReductor {
-    old_n: number;
-    new_n: number;
-    consistent: boolean;
-    private _constraints: Array<Constraint&{type: "eq"}>;
-    private _leading_indices: Vector< number | null >;
-    /** Either [new_index, null] or [null, eliminator_index] */
-    private _index_map: CoVector< [number,null] | [null,number] >;
-    private _rev_index_map: CoVector<number>;
-
-    constructor(
-        n: number,
-        constraints: Array<Constraint&{type: "eq"}>
-    ) {
-        this.old_n = n;
-        let consistent = true;
-        let eliminated_by = new_matrix<number|null>(1, n, null);
-        let eliminated_count = 0;
-        let leading_indices =
-            new_matrix<number|null>(constraints.length, 1, null);
-        for (let [index, constraint] of constraints.entries()) {
-            let leading_index: number | null = null; {
-                let max_value = 0;
-                for (let [j, value] of constraint.covector.entries()) {
-                    if (eliminated_by[j] !== null)
-                        continue;
-                    value = Math.abs(value);
-                    if (value < max_value + EPSILON)
-                        continue;
-                    leading_index = j;
-                    max_value = value;
-                }
-            }
-            if (leading_index === null) {
-                if (Math.abs(constraint.value) > EPSILON) {
-                    consistent = false;
-                }
-                continue;
-            }
-            leading_indices[index] = leading_index;
-            GaussianReductor.scale( constraint,
-                1/constraint.covector[leading_index] );
-            constraint.covector[leading_index] = 1;
-            for (let [i, other_constraint] of constraints.entries()) {
-                if (i == index)
-                    continue;
-                GaussianReductor._eliminate( other_constraint,
-                    leading_index, constraint );
-            }
-            eliminated_by[leading_index] = index;
-            eliminated_count += 1;
-        }
-        let new_m = n - eliminated_count;
-        let index_map = new_matrix<[number,null]|[null,number]>(1, n);
-        let rev_index_map = new_matrix<number>(1, new_m);
-        let image_index = 0;
-        for (let i = 0; i < n; ++i) {
-            let eliminated = eliminated_by[i];
-            if (eliminated !== null) {
-                index_map[i] = [null,eliminated];
-                continue;
-            }
-            index_map[i] = [image_index,null];
-            rev_index_map[image_index] = i;
-            image_index += 1;
-        }
-        this.new_n = new_m;
-        this.consistent = consistent;
-        this._constraints = constraints;
-        this._leading_indices = leading_indices;
-        this._rev_index_map = rev_index_map;
-        this._index_map = index_map;
-    }
-    static scale(constraint: Constraint, scale: number) {
-        let covector = constraint.covector, {m} = covector;
-        for (let i = 0; i < m; ++i) {
-            covector[i] *= scale;
-        }
-        constraint.value *= scale;
-    }
-    static _eliminate(
-        constraint: Constraint,
-        index: number,
-        eliminator: Constraint,
-    ): number {
-        let
-            covector = constraint.covector, {m} = covector,
-            eliminator_cov = eliminator.covector;
-        let ratio = covector[index] / eliminator_cov[index];
-        if (Math.abs(ratio) < EPSILON) {
-            covector[index] = 0;
-            return 0;
-        }
-        for (let i = 0; i < m; ++i) {
-            let eliminator_element = eliminator_cov[i];
-            if (eliminator_element === 0)
-                continue;
-            covector[i] -= eliminator_element * ratio;
-        }
-        covector[index] = 0;
-        constraint.value -= eliminator.value * ratio;
-        return ratio;
-    }
-    reduce_constraint( this: GaussianReductor & {consistent: true},
-        constraint: Constraint,
-    ): Constraint {
-        if (!this.consistent)
-            throw new Error(
-                "Reduction impossible: constraints were inconsistent" );
-        let m = this.new_n, rev_index_map = this._rev_index_map;
-        let
-            covector = new_matrix<number>(1, m, 0),
-            type = constraint.type,
-            value = constraint.value;
-        for (let index = 0; index < this.old_n; ++index) {
-            let preimage_element = constraint.covector[index];
-            let index_status = this._index_map[index];
-            if (index_status[1] === null) {
-                covector[index_status[0]] += preimage_element;
-                continue;
-            }
-            let
-                eliminator = this._constraints[index_status[1]],
-                eliminator_cov = eliminator.covector,
-                ratio = preimage_element / eliminator_cov[index];
-            value -= eliminator.value * ratio;
-            for (let i = 0; i < m; ++i) {
-                covector[i] -= eliminator_cov[rev_index_map[i]] * ratio;
-            }
-        }
-        return {covector, type, value};
-    }
-    reduce_covector( this: GaussianReductor & {consistent: true},
-        covector: CoVector<number>,
-    ): CoVector<number> {
-        if (!this.consistent)
-            throw new Error(
-                "Reduction impossible: constraints were inconsistent" );
-        let m = this.new_n, rev_index_map = this._rev_index_map;
-        let
-            result = new_matrix<number>(1, m, 0);
-        for (let index = 0; index < this.old_n; ++index) {
-            let preimage_element = covector[index];
-            let index_status = this._index_map[index];
-            if (index_status[1] === null) {
-                result[index_status[0]] += preimage_element;
-                continue;
-            }
-            let
-                eliminator = this._constraints[index_status[1]],
-                eliminator_cov = eliminator.covector,
-                ratio = preimage_element / eliminator_cov[index];
-            for (let i = 0; i < m; ++i) {
-                result[i] -= eliminator_cov[rev_index_map[i]] * ratio;
-            }
-        }
-        return result;
-    }
-    project_vector(vector: Vector<number>): Vector<number> {
-        let n = this.new_n, rev_index_map = this._rev_index_map;
-        let result = new_matrix<number>(n, 1);
-        for (let i = 0; i < n; ++i) {
-            result[i] = vector[rev_index_map[i]];
-        }
-        return result;
-    }
-    recover_vector( this: GaussianReductor & {consistent: true},
-        vector: Vector<number>,
-    ): Vector<number> {
-        if (!this.consistent)
-            throw new Error(
-                "Recover impossible: constraints were inconsistent" );
-        let n = this.new_n, rev_index_map = this._rev_index_map;
-        let result = new_matrix<number>(this.old_n, 1);
-        for (let index = 0; index < this.old_n; ++index) {
-            let index_status = this._index_map[index]
-            if (index_status[1] === null) {
-                result[index] = vector[index_status[0]];
-                continue;
-            }
-            let
-                eliminator = this._constraints[index_status[1]],
-                eliminator_cov = eliminator.covector;
-            let value = eliminator.value;
-            for (let i = 0; i < n; ++i) {
-                value -= vector[i] * eliminator_cov[rev_index_map[i]];
-            }
-            result[index] = value / eliminator_cov[index];
-        }
-        return result;
-    }
-}
-
-type MaybeReductor = (
-    GaussianReductor & {consistent: true} |
-    GaussianReductor & {consistent: false}
-);
-
-function evaluate_constraint(constraint: Constraint, point: Vector<number>): {
-    satisfied: boolean, exact: boolean, difference: number }
-{
-    let {covector, type, value} = constraint;
-    let difference = apply(covector, point) - value;
-    let exact = Math.abs(difference) < EPSILON;
-    return {
-        satisfied: (type === "eq") ? exact : difference > -EPSILON,
-        exact,
-        difference,
-    };
-}
-
-type LinearObjective = CoVector<number>;
-type LinearTarget = number | "min"
-// type QuadraticObjective = {
-//     quadratic: Matrix<number>,
-//     linear: CoVector<number>,
-// };
-
-type Solution = Vector<number> & {error?: false};
-type ErrorReport = {error: true, description: string};
-
-
-type UnitColumn = {row: number, values: null};
-type ValueColumn = {row: null, values: Vector<number>, objective: number};
-type LPState = {
-    k0: number,
-    point: Vector<number>,
-    row_index_map: Array<
-        {tableau_col: number, residual_col: null  } |
-        {tableau_col: null,   residual_col: number}
-    >;
-    tableau: Array<UnitColumn|ValueColumn>,
-    residuals: Array<UnitColumn|ValueColumn>,
-    differences: Array<number|null>,
-    result: false | Solution | ErrorReport,
-}
-
-export class LPProblem {
-    n: number;
-    k: number;
-    objective: LinearObjective;
-    target: LinearTarget;
-    constraints: Array<Constraint>;
-    private _result: Vector<number>;
-    private _result_feasible: boolean;
-
-    constructor(
-        {
-            objective,
-            target,
-            constraints,
-            initial,
-        }: {
-            objective: LinearObjective,
-            target: LinearTarget,
-            constraints: Array<Constraint>,
-            initial?: { point: Vector<number>, feasible: boolean},
-        }
-    ) {
-        this.n = objective.m;
-        this.objective = objective;
-        this.target = target; // XXX not used yet
-        this.k = constraints.length;
-        this.constraints = constraints;
-        if (initial === undefined) {
-            this._result = new_matrix<number>(this.objective.m, 1, 0)
-            this._result_feasible = false;
-        } else {
-            this._result = initial.point;
-            this._result_feasible = initial.feasible;
-        }
-    }
-
-    static solve_from_tokens(
-        objective: Token[],
-        target: "min",
-        constraints: Array<Token[]>,
-    ): {error?: false, solution: {[name: string]: number}} | ErrorReport {
-        let objective_expr = LinearExpression.from_tokens(objective);
-        let constraints_rels = constraints.map( tokens =>
-            LinearRelation.from_tokens(tokens) );
-        let
-            variables = new Array<string>(),
-            variable_set = new Set<string>();
-        let add_variable = (variable: string) => {
-            if (!variable_set.has(variable)) {
-                variables.push(variable);
-                variable_set.add(variable);
-            }
-        }
-        for (let variable of objective_expr.get_variables()) {
-            add_variable(variable);
-        }
-        for (let constraint of constraints_rels) {
-            for (let variable of constraint.get_variables()) {
-                add_variable(variable);
-            }
-        }
-        let indices: {[name: string]: number} = {};
-        for (let [index, name] of variables.entries()) {
-            indices[name] = index;
-        }
-        let n = variables.length;
-        let problem = new LPProblem({
-            objective: objective_expr.as_covector(n, indices)[0],
-            target,
-            constraints: constraints_rels.map( constraint => 
-                constraint.as_constraint(n, indices) ),
-        });
-        let solution = problem.solve();
-        if (solution.error) {
-            return solution;
-        }
-        if (solution.length != n) {
-            throw new Error("unreachable");
-        }
-        let successful = solution;
-        return {solution: Object.fromEntries(variables.map(
-            (name, index) => [name, successful[index]] ))};
-    }
-
-    static find_feasible_point(
-        n: number,
-        constraints: Array<Constraint&{type: "geq"}>,
-        initial?: Vector<number>,
-    ): Solution | ErrorReport {
-        let point = (initial !== undefined) ? initial :
-            new_matrix<number>(n, 1, 0);
-        let constraints_satisfied = constraints.map<[boolean,number]>(
-            constraint => {
-                let {satisfied, difference} =
-                    evaluate_constraint(constraint, point);
-                return [satisfied, difference];
-            }
-        );
-        if (constraints_satisfied.every(([satisfied, ]) => satisfied)) {
-            return point;
-        }
-        let feasibility_objective = new_matrix<number>(1, n + 1, 0);
-        feasibility_objective[n] = +1;
-        let feasibility_initial = copy_matrix(point);
-        feasibility_initial.n = n + 1;
-        feasibility_initial.push(Math.max(...constraints_satisfied.map(
-            ([satisfied, difference]) => satisfied? 0 : -difference )));
-        let feasibility_constraints = constraints.map( (constraint) => {
-            let covector = copy_matrix(constraint.covector);
-            covector.m = n + 1;
-            covector.push(+1);
-            return { covector,
-                type: constraint.type, value: constraint.value };
-        });
-        feasibility_constraints.push({
-            covector: feasibility_objective,
-            type: "geq",
-            value: 0
-        });
-        let feasibility_problem = new LPProblem({
-            objective: feasibility_objective,
-            target: 0,
-            constraints: feasibility_constraints,
-            initial: { point: feasibility_initial, feasible: true },
-        });
-        let feasibility_solution = feasibility_problem.solve();
-        if (feasibility_solution?.error) {
-            return feasibility_solution;
-        }
-        if (feasibility_solution[n] > EPSILON) {
-            return {error: true, description: "Infeasible"};            
-        }
-        let feasible_point: Vector<number> =
-            Object.assign( feasibility_solution.slice(0, n),
-                {n, m: <1>1} );
-        return feasible_point;
-    }
-
-    solve(): Solution | ErrorReport {
-        let
-            eq_constraints = new Array<Constraint&{type:"eq"}>(),
-            geq_constraints = new Array<Constraint&{type:"geq"}>();
-        for (let constraint of this.constraints) {
-            if (constraint.type == "eq") {
-                eq_constraints.push(constraint);
-            } else {
-                geq_constraints.push(constraint);
-            }
-        }
-        if (eq_constraints.length != 0) {
-            let maybe_reductor: MaybeReductor =
-                new GaussianReductor(this.n, eq_constraints);
-            if (!maybe_reductor.consistent)
-                return { error: true,
-                    description: "Equations are inconsistent" };
-            let reductor = maybe_reductor;
-            // let recover_result = (solution:) => {
-            //     return reductor.recover_vector(solution);
-            // }
-            let reduced_objective: Constraint = reductor.reduce_constraint({
-                covector: this.objective,
-                type: "eq",
-                value: this.target == "min" ? 0 : this.target });
-            let result = new LPProblem({
-                objective: reduced_objective.covector,
-                target: this.target == "min" ? "min" : reduced_objective.value,
-                constraints: geq_constraints.map( constraint =>
-                    reductor.reduce_constraint(constraint) ),
-                initial: {
-                    point: reductor.project_vector(this._result),
-                    feasible: this._result_feasible,
-                }
-            }).solve();
-            if (result.error)
-                return result;
-            return reductor.recover_vector(result);
-        }
-        let feasible_point: Vector<number>;
-        if (this._result_feasible) {
-            feasible_point = this._result;
-        } else {
-            let feasibility_solution = LPProblem.find_feasible_point(
-                this.n, geq_constraints, this._result );
-            if (feasibility_solution.error)
-                return feasibility_solution;
-            feasible_point = feasibility_solution;
-        }
-        let state = this._build_initial_state(feasible_point);
-        while (state.result === false) {
-            state = this._step(state);
-        }
-        let result = state.result;
-        if (result.error)
-            return result;
-        return result;
-    }
-
-    _build_initial_state(
-        feasible_point: Vector<number>,
-    ): LPState {
-        const {n, k} = this;
-        let k0: number = 0;
-        let point = feasible_point;
-        let row_index_map = new Array<{
-            tableau_col: number, residual_col: null,
-        }>();
-        let tableau = new Array<UnitColumn>();
-        for (let index = 0; index < k; ++index) {
-            row_index_map[index] = {tableau_col: index, residual_col: null};
-            tableau[index] = {row: index, values: null};
-        }
-
-        let residuals = new Array<{
-            row: null, values: Vector<number>, objective: number,
-        }>();
-        for (let index = 0; index < n; ++index) {
-            residuals.push({ row: null,
-                values: Object.assign(new Array(k), {n: k, m: <1>1}),
-                objective: this.objective[index] });
-        }
-        let differences = new Array<number>(k);
-        this.constraints.forEach((constraint, index) => {
-            if (constraint.type == "eq")
-                throw new Error("unreachable");
-            for (let [i, value] of constraint.covector.entries()) {
-                residuals[i].values[index] = value;
-            }
-            let
-                value = apply(constraint.covector, point),
-                difference = value - constraint.value;
-            differences[index] = difference;
-            if (difference < -EPSILON) {
-                throw new Error("unreachable");
-            }
-        });
-
-        return {
-            k0, point,
-            row_index_map, tableau,
-            residuals, differences,
-            result: false,
-        };
-    }
-
-    /** somewhat expensive check, debug-only */
-    _validate_state(state: LPState): void {
-        const {n, k} = this;
-        for (let j = 0; j < k; ++j) {
-            let constraint = this.constraints[j];
-            if (constraint.type === "eq")
-                throw new Error("unreachable");
-            let difference: number; {
-                let tableau_col = state.tableau[j];
-                if (tableau_col.values !== null) {
-                    difference = 0;
-                } else {
-                    let maybe_difference = state.differences[tableau_col.row];
-                    if (maybe_difference === null)
-                        throw new Error("unreachable");
-                    difference = maybe_difference;
-                }
-            }
-            let true_difference =
-                apply(constraint.covector, state.point) - constraint.value;
-            if (Math.abs(true_difference - difference) > EPSILON) {
-                throw new Error("State is invalid");
-            }
-        }
-    }
-
-    _step(state: LPState): LPState {
-        let leaving_item = this._find_leaving_index(state);
-        if (leaving_item === null) {
-            return Object.assign({}, state, {result: state.point});
-        }
-        let entering_index: number; {
-            let entering_index_info:
-                {index: number, error?: false} | ErrorReport;
-            if (leaving_item?.variable !== undefined) {
-                entering_index_info = this._find_entering_index(
-                    state, leaving_item.variable );
-            } else {
-                entering_index_info = this._find_replacing_index(
-                    state, leaving_item.constraint );
-            }
-            if (entering_index_info.error) {
-                return Object.assign({}, state, {result: entering_index_info});
-            }
-            entering_index = entering_index_info.index;
-        }
-        if (leaving_item.variable !== undefined) {
-            return this._pivot_entering(state, leaving_item, entering_index);
-        } else {
-            return this._pivot_replacing(state, leaving_item, entering_index);
-        }
-    }
-
-    _find_leaving_index(state: LPState): (
-        null |
-        { variable: {index: number, residual_column: ValueColumn, sign: 1 | -1},
-            constraint?: undefined,
-            vector: Vector<number> } |
-        { constraint: {index: number, tableau_column: ValueColumn},
-            variable?: undefined,
-            vector: Vector<number> }
-    ) {
-        const {n} = this;
-        let max_residual: {index: number, column: ValueColumn} | null = null; {
-            let max_value = 0;
-            for (let [index, column] of state.residuals.entries()) {
-                if (column.values === null)
-                    continue;
-                let value = Math.abs(column.objective);
-                if (value < max_value + EPSILON)
-                    continue;
-                max_residual = {index, column};
-                max_value = value;
-            }
-        }
-        if (max_residual !== null) {
-            let leaving_index = max_residual.index;
-            let value: 1 | -1 = max_residual.column.objective > 0 ? -1 : 1;
-            let leaving_vector: Vector<number> = Object.assign(
-                new Array<number>(), {n, m: <1>1} );
-            let residual_values = max_residual.column.values;
-            for (let i = 0; i < n; ++i) {
-                let column = state.residuals[i];
-                if (column.row === null) {
-                    leaving_vector[i] = 0;
-                } else {
-                    leaving_vector[i] = -value * residual_values[column.row];
-                }
-            }
-            leaving_vector[leaving_index] = value;
-            return {
-                variable: { index: leaving_index, sign: value,
-                    residual_column: max_residual.column },
-                vector: leaving_vector,
-            };
-        }
-        for (let [index, column] of state.tableau.entries()) {
-            if (column.values === null || column.objective < EPSILON)
-                continue;
-            let leaving_vector: Vector<number> = Object.assign(
-                new Array<number>(), {n, m: <1>1} );
-            let leaving_values = column.values;
-            for (let i = 0; i < n; ++i) {
-                let i_column = state.residuals[i];
-                if (i_column.row === null) {
-                    leaving_vector[i] = 0;
-                } else {
-                    leaving_vector[i] = leaving_values[i_column.row];
-                }
-            }
-            return { constraint: {index: index, tableau_column: column},
-                vector: leaving_vector };
-        }
-        return null;
-    }
-
-    _find_entering_index( state: LPState,
-        leaving_variable: { index: number, sign: 1 | -1,
-            residual_column: ValueColumn },
-    ): {index: number, error?: false} | ErrorReport
-    {
-        let
-            entering_index: null | number = null,
-            min_ratio: null | number = null;
-        let leaving_values = leaving_variable.residual_column.values;
-        let differences = state.differences;
-        for (let [index, index_info] of state.row_index_map.entries()) {
-            if (index_info.tableau_col === null)
-                continue;
-            let
-                leaving_value = leaving_values[index] * leaving_variable.sign,
-                difference = differences[index] || 0;
-            if (leaving_value > -EPSILON)
-                continue;
-            if (difference < EPSILON)
-                return {index}; // Bland's rule, kinda
-            let ratio = difference / -leaving_value;
-            if (ratio < -EPSILON) {
-                throw new Error("unreachable");
-            }
-            if (min_ratio === null || ratio < min_ratio) {
-                min_ratio = ratio;
-                entering_index = index;
-            }
-        }
-        if (entering_index === null) {
-            return {error: true, description: "Unbounded"};
-        }
-        return {index: entering_index};
-    }
-
-    _find_replacing_index( state: LPState,
-        leaving_constraint: {index: number, tableau_column: ValueColumn},
-    ): {index: number, error?: false} | ErrorReport {
-        let
-            entering_index: null | number = null,
-            min_ratio: null | number = null;
-        let leaving_values = leaving_constraint.tableau_column.values;
-        let differences = state.differences;
-        for (let [index, index_info] of state.row_index_map.entries()) {
-            if (index_info.tableau_col === null)
-                continue;
-            let
-                leaving_value = leaving_values[index],
-                difference = differences[index] || 0;
-            if (leaving_value < EPSILON)
-                continue;
-            if (difference < EPSILON)
-                return {index}; // Bland's rule
-            let ratio = difference / leaving_value;
-            if (ratio < -EPSILON) {
-                throw new Error("unreachable");
-            }
-            if (min_ratio === null || ratio < min_ratio) {
-                min_ratio = ratio;
-                entering_index = index;
-            }
-        }
-        if (entering_index === null) {
-            return {error: true, description: "Unbounded"};
-        }
-        return {index: entering_index};
-    }
-
-    _pivot_entering(
-        {
-            k0,
-            row_index_map,
-            tableau,
-            residuals,
-            differences,
-            point,
-        }: LPState,
-        leaving_item: {
-            variable: {index: number, residual_column: ValueColumn, sign: 1 | -1},
-            vector: Vector<number> },
-        entering_index: number,
-    ): LPState {
-        const {n, k} = this;
-        point = copy_matrix(point);
-        row_index_map = Array.from(row_index_map);
-        tableau = tableau.map(column => {
-            if (column.row !== null)
-                return {row: column.row, values: null};
-            return { row: null,
-                values: copy_matrix(column.values),
-                objective: column.objective };
-        });
-        residuals = residuals.map(column => {
-            if (column.row !== null)
-                return {row: column.row, values: null};
-            return { row: null,
-                values: copy_matrix(column.values),
-                objective: column.objective };
-        });
-        differences = Array.from(differences);
-
-        let leaving_variable = leaving_item.variable;
-        let leaving_column = leaving_variable.residual_column;
-        let leaving_values: Array<number> = leaving_column.values;
-        let leaving_objective = leaving_column.objective;
-        let leaving_index = leaving_variable.index;
-
-        // shift the point
-        let vector = leaving_item.vector;
-        let entering_difference = differences[entering_index];
-        if (entering_difference === null)
-            throw new Error("unreachable");
-        let vector_scale: number = -entering_difference / (
-            vector[leaving_index] * leaving_values[entering_index] );
-        if (vector_scale < -EPSILON)
-            throw new Error("unreachable");
-        for (let i = 0; i < n; ++i) {
-            point[i] += vector_scale * vector[i];
-        }
-        let difference_scale = vector_scale * vector[leaving_index];
-        for (let [index, difference] of differences.entries()) {
-            if (difference === null)
-                continue;
-            difference += leaving_values[index] * difference_scale;
-            if (difference < -EPSILON)
-                throw new Error("unreachable");
-            differences[index] = difference;
-        }
-        differences[entering_index] = null;
-
-        { // reconstruct the entering column
-            let entering_values: Vector<number> = new_matrix<number>(k, 1, 0);
-            entering_values[entering_index] = 1;
-            let entering_col =
-                row_index_map[entering_index].tableau_col;
-            if (entering_col === null)
-                throw new Error("unreachable");
-            tableau[entering_col] = {
-                row: null,
-                values: entering_values,
-                objective: 0,
-            };
-        }
-
-        { // scale entering row
-            let leading_value = leaving_values[entering_index];
-            for (let column of tableau) {
-                if (column.values === null)
-                    continue;
-                column.values[entering_index] /= leading_value;
-            }
-            for (let column of residuals) {
-                if (column.values === null)
-                    continue;
-                column.values[entering_index] /= leading_value;
-            }
-            leaving_values[entering_index] = 1;
-        }
-
-        // save leaving_values
-        leaving_values = Array.from(leaving_values);
-        // eliminate with the entering row
-        for (let column of tableau) {
-            if (column.values === null)
-                continue;
-            let values = column.values;
-            let eliminator_element = values[entering_index];
-            for (let i = 0; i < leaving_values.length; ++i) {
-                if (i == entering_index)
-                    continue;
-                values[i] -= eliminator_element * leaving_values[i];
-            }
-            column.objective -= eliminator_element * leaving_objective;
-        }
-        for (let column of residuals) {
-            if (column.values === null)
-                continue;
-            let values = column.values;
-            let eliminator_element = values[entering_index];
-            for (let i = 0; i < leaving_values.length; ++i) {
-                if (i == entering_index)
-                    continue;
-                values[i] -= eliminator_element * leaving_values[i];
-            }
-            column.objective -= eliminator_element * leaving_objective;
-        }
-
-        row_index_map[entering_index] =
-            {tableau_col: null, residual_col: leaving_index};
-        residuals[leaving_index] = {row: entering_index, values: null};
-        return {
-            k0: k0 + 1,
-            point,
-            row_index_map,
-            tableau,
-            residuals,
-            differences,
-            result: false,
-        };
-    }
-
-    _pivot_replacing(
-        {
-            k0,
-            row_index_map,
-            tableau,
-            residuals,
-            differences,
-            point,
-        }: LPState,
-        leaving_item: {
-            constraint: {index: number, tableau_column: ValueColumn},
-            vector: Vector<number> },
-        entering_index: number,
-    ): LPState {
-        const {n, k} = this;
-        point = copy_matrix(point);
-        row_index_map = Array.from(row_index_map);
-        tableau = tableau.map(column => {
-            if (column.row !== null)
-                return {row: column.row, values: null};
-            return { row: null,
-                values: copy_matrix(column.values),
-                objective: column.objective };
-        });
-        residuals = residuals.map(column => {
-            if (column.row !== null)
-                return {row: column.row, values: null};
-            return { row: null,
-                values: copy_matrix(column.values),
-                objective: column.objective };
-        });
-        differences = Array.from(differences);
-
-        let leaving_constraint = leaving_item.constraint;
-        let leaving_column = leaving_constraint.tableau_column;
-        let leaving_values: Array<number> = leaving_column.values;
-        let leaving_objective = leaving_column.objective;
-        let leaving_index = leaving_constraint.index;
-
-        // shift the point
-        let vector = leaving_item.vector;
-        let entering_difference = differences[entering_index];
-        if (entering_difference === null)
-            throw new Error("unreachable");
-        let vector_scale: number =
-            entering_difference / leaving_values[entering_index];
-        if (vector_scale < -EPSILON)
-            throw new Error("unreachable");
-        for (let i = 0; i < n; ++i) {
-            point[i] += vector_scale * vector[i];
-        }
-
-        { // reconstruct the entering column
-            let entering_values: Vector<number> = new_matrix<number>(k, 1, 0);
-            entering_values[entering_index] = 1;
-            let entering_col =
-                row_index_map[entering_index].tableau_col;
-            if (entering_col === null)
-                throw new Error("unreachable");
-            tableau[entering_col] = {
-                row: null,
-                values: entering_values,
-                objective: 0,
-            };
-        }
-
-        { // scale entering row
-            let leading_value = leaving_values[entering_index];
-            for (let column of tableau) {
-                if (column.values === null)
-                    continue;
-                column.values[entering_index] /= leading_value;
-            }
-            for (let column of residuals) {
-                if (column.values === null)
-                    continue;
-                column.values[entering_index] /= leading_value;
-            }
-            differences[entering_index] = entering_difference =
-                entering_difference / leading_value;
-            leaving_values[entering_index] = 1;
-        }
-
-        // save leaving_values
-        leaving_values = Array.from(leaving_values);
-
-        for (let column of tableau) {
-            if (column.values === null)
-                continue;
-            let values = column.values;
-            let eliminator_element = values[entering_index];
-            for (let i = 0; i < leaving_values.length; ++i) {
-                if (i == entering_index)
-                    continue;
-                values[i] -= eliminator_element * leaving_values[i];
-            }
-            column.objective -= eliminator_element * leaving_objective;
-        }
-        for (let column of residuals) {
-            if (column.values === null)
-                continue;
-            let values = column.values;
-            let eliminator_element = values[entering_index];
-            for (let i = 0; i < leaving_values.length; ++i) {
-                if (i == entering_index)
-                    continue;
-                values[i] -= eliminator_element * leaving_values[i];
-            }
-            column.objective -= eliminator_element * leaving_objective;
-        }
-        for (let i = 0; i < leaving_values.length; ++i) {
-            if (i == entering_index)
-                continue;
-            let difference = differences[i];
-            if (difference === null)
-                continue;
-            difference -= entering_difference * leaving_values[i];
-            if (difference < -EPSILON)
-                throw new Error("unreachable");
-            differences[i] = difference;
-        }
-
-        row_index_map[entering_index] =
-            {tableau_col: leaving_index, residual_col: null};
-        tableau[leaving_index] = {row: entering_index, values: null};
-        return {
-            k0: k0 + 1,
-            point,
-            row_index_map,
-            tableau,
-            residuals,
-            differences,
-            result: false,
-        };
-    }
-
-}
-
 class LinearExpression {
     coefficients: {[name: string]: number}
     constant: number;
@@ -1102,14 +99,16 @@ class LinearExpression {
         yield* Object.keys(this.coefficients);
     }
 
-    as_covector(n: number, indices: {[name: string]: number}):
-        [CoVector<number>, number]
+    as_sparse_covector(n: number, indices: {[name: string]: number}):
+        Sparse.CoVector
     {
-        let covector = new_matrix(1, n, 0);
+        let covector = Sparse.CoVector.zero(n + 1);
         for (let [name, value] of Object.entries(this.coefficients)) {
-            covector[indices[name]] = value;
+            covector.set_value(indices[name], value);
         }
-        return [covector, this.constant];
+        if (Math.abs(this.constant) > 0)
+            covector.set_value(n, this.constant);
+        return covector;
     }
 }
 
@@ -1167,16 +166,13 @@ class LinearRelation {
         yield* this.left.get_variables();
     }
 
-    as_constraint(n: number, indices: {[name: string]: number}): Constraint {
-        let covector = new_matrix(1, n, 0);
-        for (let [name, value] of Object.entries(this.left.coefficients)) {
-            covector[indices[name]] = value;
-        }
-        return {
-            covector: covector,
-            type: this.relation,
-            value: -this.left.constant,
-        };
+    as_sparse_covector(n: number, indices: {[name: string]: number}):
+        [Sparse.CoVector, "eq" | "geq"]
+    {
+        return [
+            this.left.as_sparse_covector(n, indices),
+            this.relation
+        ];
     }
 }
 
@@ -1566,7 +562,1437 @@ class ASTSub extends ASTBinary {}
 class ASTMul extends ASTBinary {}
 class ASTDiv extends ASTBinary {}
 
+export namespace Sparse {
+
+class DimensionError extends Error {};
+
+class NumberArray {
+    size: number;
+    indices: Array<number>;
+    values: Array<number>;
+
+    constructor(
+        size: number,
+        indices: Array<number>,
+        values: Array<number>,
+    ) {
+        this.size = size;
+        this.indices = indices;
+        this.values = values;
+    }
+
+    as_dense(): Array<number> {
+        let dense = new Array<number>(this.size);
+        dense.fill(0);
+        for (let [index, value] of this.iter_items()) {
+            dense[index] = value;
+        }
+        return dense;
+    }
+
+    _copy_as<TSparse extends NumberArray>(SparseClass: (new (
+        size: number,
+        indices: Array<number>,
+        values: Array<number>,
+    ) => TSparse)): TSparse {
+        return new SparseClass( this.size,
+            Array.from(this.indices), Array.from(this.values) );
+    }
+
+    /** @param items [index, value] pairs */
+    static _from_items_as<TArray extends NumberArray>(
+        ArrayClass: (new (
+            size: number,
+            indices: Array<number>,
+            values: Array<number>,
+        ) => TArray),
+        size: number,
+        items: Iterable<[number, number]>,
+    ): TArray {
+        let
+            indices = new Array<number>(),
+            values = new Array<number>();
+        for (let [index, value] of items) {
+            indices.push(index);
+            values.push(value);
+        }
+        indices.push(size); // guard
+        return new ArrayClass(size, indices, values);
+    }
+
+    static _from_dense_as<TArray extends NumberArray>(
+        ArrayClass: (new (
+            size: number,
+            indices: Array<number>,
+            values: Array<number>,
+        ) => TArray),
+        dense: Array<number>,
+    ): TArray {
+        return this._from_items_as( ArrayClass,
+            dense.length,
+            function*(): Iterable<[number,number]> {
+                for (let [index, value] of dense.entries()) {
+                    if (Math.abs(value) < EPSILON)
+                        continue;
+                    yield [index, value];
+                }
+            }.call(this),
+        );
+    }
+
+    _start_i(index: number): number {
+        let start_index = this.indices.length - 1 - (this.size - index);
+        if (start_index < 0)
+            return 0;
+        return start_index;
+    }
+
+    *map_items<V>(
+        callbackfn: (index: number, value: number) => V,
+        start?: number, end?: number,
+    ): IterableIterator<V> {
+        let {indices, values} = this;
+        if (start === undefined)
+            start = 0;
+        if (end === undefined || end > this.size)
+            end = this.size;
+        for ( let i = this._start_i(start); i < indices.length; ++i) {
+            let index = indices[i];
+            if (index < start)
+                continue;
+            if (index >= end)
+                return;
+            yield callbackfn(index, values[i]);
+        }
+    }
+
+    /** @yields [index, value] pairs */
+    iter_items(start?: number, end?: number):
+        IterableIterator<[number, number]>
+    {
+        return this.map_items(
+            (index, value) => [index, value],
+            start, end );
+    }
+
+    get_value(index: number, null_if_zero?: false): number
+    get_value(index: number, null_if_zero: true): number | null
+    get_value(index: number, null_if_zero: boolean = false): number | null {
+        let [value = null_if_zero ? null : 0] =
+            this.map_items((_, value) => value, index, index + 1);
+        return value;
+    }
+
+    set_value(index: number, value: number | null): void {
+        if (index < 0 || index >= this.size)
+            throw new DimensionError();
+        let {indices, values} = this;
+        for (let j = this._start_i(index); true; ++j) {
+            let jndex = indices[j];
+            if (jndex < index)
+                continue;
+            if (jndex > index) {
+                if (value !== null) {
+                    indices.splice(j, 0, index);
+                    values.splice(j, 0, value);
+                }
+                return;
+            }
+            if (value !== null) {
+                values[j] += value;
+            } else {
+                indices.splice(j, 1);
+                values.splice(j, 1);
+            }
+            return;
+        }
+    }
+
+    add_value(index: number, value: number): void {
+        if (index < 0 || index >= this.size)
+            throw new DimensionError();
+        let {indices, values} = this;
+        for (let j = this._start_i(index); true; ++j) {
+            let jndex = indices[j];
+            if (jndex < index)
+                continue;
+            if (jndex > index) {
+                indices.splice(j, 0, index);
+                values.splice(j, 0, value);
+                return;
+            }
+            values[j] += value;
+            return;
+        }
+    }
+
+    add_items(items: Iterable<[number,number]>): void {
+        const {size} = this;
+        let {indices, values} = this;
+        let j = 0, jndex = indices[j], prev_jndex = -1;
+        let leftover_items = new Array<[number,number]>();
+        for (let [index, value] of items) {
+            if (index < 0 || index >= size)
+                throw new DimensionError();
+            while (jndex < index) {
+                prev_jndex = jndex;
+                jndex = indices[++j];
+            }
+            if (jndex > index) {
+                if (prev_jndex < index) {
+                    indices.splice(j, 0, index); jndex = index;
+                    values.splice(j, 0, value);
+                    continue;
+                }
+            } else {
+                values[j] += value;
+                continue;
+            }
+            leftover_items.push([index, value]);
+        }
+        for (let [index, value] of leftover_items) {
+            this.add_value(index, value);
+        }
+    }
+
+    add_from(
+        array: NumberArray,
+        indices: {
+            start?: number,
+            end?: number,
+            map?: (index: number) => number | null,
+        } = {},
+    ): void {
+        let unmapped_items = array.iter_items(indices.start, indices.end)
+        if (indices.map === undefined)
+            return this.add_items(unmapped_items);
+        let index_map = indices.map;
+        this.add_items(function*(): Iterable<[number,number]> {
+            for (let [index, value] of unmapped_items) {
+                let new_index = index_map(index);
+                if (new_index === null)
+                    continue;
+                yield [new_index, value];
+            }
+        }.call(this));
+    }
+
+}
+
+export class Vector extends NumberArray {
+    get height() {
+        return this.size;
+    }
+
+    copy(): Vector {
+        return this._copy_as(Vector);
+    }
+
+    static from_items(
+        height: number,
+        items: Iterable<[number, number]>,
+    ): Vector {
+        return this._from_items_as(Vector, height, items);
+    }
+
+    static from_dense(dense: Array<number>): Vector {
+        return this._from_dense_as(Vector, dense);
+    }
+
+    static zero(height: number): Vector {
+        return this.from_items(height, []);
+    }
+}
+
+export class CoVector extends NumberArray {
+
+    constructor(
+        width: number,
+        indices: Array<number>,
+        values: Array<number>,
+    ) {
+        super(width, indices, values);
+    }
+
+    get width() {
+        return this.size;
+    }
+
+    copy(): CoVector {
+        return this._copy_as(CoVector);
+    }
+
+    static from_items(
+        width: number,
+        items: Iterable<[number, number]>,
+    ): CoVector {
+        return this._from_items_as(CoVector, width, items);
+    }
+
+    static zero(width: number): CoVector {
+        return this.from_items(width, []);
+    }
+
+    static from_dense(dense: Array<number>): CoVector {
+        return this._from_dense_as(CoVector, dense);
+    }
+
+    apply( vector: Vector,
+        {
+            const_factor = 1,
+            start_offset = 0,
+            end_offset = 0,
+        } :
+        {
+            const_factor?: 0 | 1,
+            start_offset?: number,
+            end_offset?: number,
+        } = {},
+    ): number {
+        const width = this.width - 1, height = vector.height;
+        if (width != height + start_offset + end_offset)
+            throw new DimensionError();
+        let indices = this.indices;
+        let jndices = vector.indices;
+        let result = this.get_value(width) * const_factor;
+        if (indices.length == 0 || jndices.length == 0)
+            return result;
+        let start_index = start_offset > 0 ? start_offset : 0;
+        for ( let
+                i = this._start_i(start_index), j = 0,
+                index = indices[i], jndex = jndices[j];
+            true; )
+        {
+            if (index < jndex + start_offset) {
+                ++i; index = indices[i];
+                if (index >= width)
+                    break;
+                continue;
+            }
+            if (index > jndex + start_offset) {
+                ++j; jndex = jndices[j];
+                if (jndex >= height)
+                    break;
+                continue;
+            }
+            result += this.values[i] * vector.values[j];
+            ++i; index = indices[i];
+            ++j; jndex = jndices[j];
+            if (index >= width || jndex >= height)
+                break;
+            // XXX debug
+            if (!isFinite(result))
+                throw new Error("unreachable");
+        }
+        return result;
+    }
+
+    relative_to(vector: Vector): CoVector {
+        const {width} = this;
+        let relative: CoVector = this.copy();
+        relative.add_value(width-1, this.apply(vector, {const_factor: 0}));
+        return relative;
+    }
+
+    scale(ratio: number | null): void {
+        const {width} = this;
+        if (ratio === null) {
+            this.indices = [width];
+            this.values = [];
+            return;
+        }
+        let {indices, values} = this;
+        for (let i = 0; i < values.length; ++i) {
+            values[i] *= ratio;
+        }
+    }
+
+    /**
+     * @param eliminator 
+     * @param symmetrical
+     *   facilitates symmetrical elimination of quadratic matrix
+     * @param eliminate_half
+     *   facilitates symmetrical elimination of quadratic matrix
+     */
+    eliminate_with(
+        eliminator: {
+            row: CoVector,
+            index: number,
+            value: number,
+        },
+        {
+            symmetrical = null,
+            eliminate_half = false,
+        }: {
+            symmetrical?: ((index: number, increase: number) => void) | null,
+            eliminate_half?: boolean,
+        } = {}
+    ): void {
+        const {width} = this;
+        if (eliminator.row.width !== width)
+            throw new DimensionError();
+        let {indices, values} = this;
+        let {
+            row: {indices: elim_indices, values: elim_values},
+            index: elim_index,
+        } = eliminator;
+        if (elim_values.length < 1)
+            throw new Error("Eliminator is a zero row");
+        if (elim_index < 0 || elim_index >= width)
+            throw new DimensionError();
+        let ratio: number | null = null;
+        for (let i = this._start_i(elim_index); i < indices.length; ++i) {
+            let index = indices[i];
+            if (index < elim_index)
+                continue;
+            if (index > elim_index)
+                return;
+            let value = values[i];
+            if (Math.abs(value) < EPSILON) {
+                indices.splice(i, 1);
+                values.splice(i, 1);
+                return;
+            }
+            ratio = -value / eliminator.value;
+            break;
+        }
+        if (ratio === null)
+            return;
+        if (!isFinite(ratio))
+            throw new Error("unreachable");
+        if (eliminate_half)
+            ratio /= 2;
+        let increases = new Array<[number, number]>();
+        for (let j = 0, i = 0, index = elim_indices[i]; true;) {
+            let jndex = indices[j];
+            if (jndex < index) {
+                ++j; continue;
+            }
+            let increase = elim_values[i] * ratio;
+            increase: {
+                if (jndex > index) {
+                    indices.splice(j, 0, index);
+                    values.splice(j, 0, increase);
+                    ++j; break increase;
+                } else if (jndex === elim_index) {
+                    indices.splice(j, 1);
+                    values.splice(j, 1);
+                    break increase;
+                } else {
+                    values[j] += increase;
+                    ++j; break increase;
+                }
+            }
+            if (symmetrical !== null)
+                increases.push([index, increase]);
+            ++i; index = elim_indices[i];
+            if (index >= width)
+                break;
+        }
+        if (symmetrical !== null) {
+            for (let [index, increase] of increases)
+                symmetrical(index, increase);
+        }
+    }
+
+    find_extreme(
+        start?: number,
+        end?: number,
+        {
+            direction = "abs",
+            value_sign = "any",
+        }: {
+            direction?: "min" | "max" | "abs",
+            value_sign?: 1 | -1 | "any",
+        } = {},
+    ): {index: number, value: number} | null {
+        let extreme_comparator: number = 0,
+            extreme: {index: number, value: number} | null = null;
+        iterate_values:
+        for (let [index, value] of this.iter_items(start, end)) {
+            switch (value_sign) {
+                case "any":
+                    break;
+                case  1:
+                    if (value <  EPSILON) continue iterate_values;
+                    break;
+                case -1:
+                    if (value > -EPSILON) continue iterate_values;
+                    break;
+                default:
+                    throw new Error("unreachable");
+            }
+            is_more_exreme: {
+                switch (direction) {
+                    case "abs":
+                        let comparator = Math.abs(value);
+                        if (comparator < extreme_comparator + EPSILON)
+                            continue iterate_values;
+                        extreme_comparator = comparator;
+                        break is_more_exreme;
+                    case "max":
+                        if (value < extreme_comparator + EPSILON)
+                            continue iterate_values;
+                        extreme_comparator = value;
+                        break is_more_exreme;
+                    case "min":
+                        if (value > extreme_comparator - EPSILON)
+                            continue iterate_values;
+                        extreme_comparator = value;
+                        break is_more_exreme;
+                }
+            }
+            extreme = {index, value};
+        }
+        return extreme;
+    }
+
+    scale_extreme(
+        start?: number,
+        end?: number,
+        {
+            objective: direction = "abs",
+            objective_sign: value_sign = "any",
+            preserve_sign = false,
+        }: {
+            objective?: "min" | "max" | "abs",
+            objective_sign?: 1 | -1 | "any",
+            preserve_sign?: boolean,
+        } = {},
+    ): {index: number, value: number} | null {
+        let extreme_info = this.find_extreme( start, end,
+            {direction: direction, value_sign: value_sign} );
+        if (extreme_info === null)
+            return null;
+        let {index: extreme_index, value: extreme_value} = extreme_info;
+        let extreme_replacement = preserve_sign ?
+            (extreme_value > 0 ? +1 : -1) : 1;
+        let ratio = extreme_replacement / extreme_value;
+        if (!isFinite(ratio))
+            throw new Error("unreachable");
+        let {indices, values} = this;
+        for (let i = 0; i < values.length; ++i) {
+            if (indices[i] === extreme_index) {
+                values[i] = extreme_replacement;
+            } else {
+                values[i] *= ratio;
+            }
+        }
+        return {index: extreme_index, value: extreme_replacement};
+    }
+
+    scale_index(
+        index: number,
+        {preserve_sign = false}: {preserve_sign?: boolean} = {},
+    ): {value: number} {
+        let value = this.get_value(index);
+        if (Math.abs(value) < EPSILON)
+            throw new Error("unreachable");
+        let replacement = preserve_sign ?
+            (value > 0 ? +1 : -1) : 1;
+        let ratio = replacement / value;
+        if (!isFinite(ratio))
+            throw new Error("unreachable");
+        let {indices, values} = this;
+        for (let i = 0; i < values.length; ++i) {
+            if (indices[i] === index) {
+                values[i] = replacement;
+            } else {
+                values[i] *= ratio;
+            }
+        }
+        return {value: replacement};
+    }
+
+}
+
+export class Matrix {
+    width: number;
+    rows: Array<CoVector>;
+
+    constructor(
+        width: number,
+        rows: Array<CoVector>,
+    ) {
+        this.width = width;
+        this.rows = rows;
+    }
+
+    get height(): number {
+        return this.rows.length;
+    }
+
+    _copy_as<TMatrix extends Matrix>(
+        MatrixClass: (new (
+            width: number,
+            rows: Array<CoVector>,
+        ) => TMatrix),
+    ): TMatrix {
+        return new MatrixClass( this.width,
+            this.rows.map(row => row.copy()) );
+    }
+
+    copy_matrix(): Matrix {
+        return this._copy_as(Matrix);
+    }
+
+    static _from_dense_as<TMatrix extends Matrix>(
+        MatrixClass: (new (
+            width: number,
+            rows: Array<CoVector>,
+        ) => TMatrix),
+        width: number,
+        dense: Array<Array<number>>,
+    ): TMatrix {
+        return new MatrixClass( width,
+            dense.map(dense_row => CoVector.from_dense(dense_row)),
+        );
+    }
+
+    static from_dense(width: number, dense: Array<Array<number>>): Matrix {
+        return this._from_dense_as(Matrix, width, dense);
+    }
+
+    as_dense(): Array<Array<number>> {
+        let dense = this.rows.map(row => row.as_dense());
+        return dense;
+    }
+
+    static _zero_as<TMatrix extends Matrix>(
+        MatrixClass: (new (
+            width: number,
+            rows: Array<CoVector>,
+        ) => TMatrix),
+        width: number, height: number
+    ): TMatrix {
+        let rows = new Array<CoVector>();
+        for (let i = 0; i < height; ++i) {
+            rows.push(CoVector.zero(width));
+        }
+        return new MatrixClass(width, rows);
+    }
+    static zero(width: number, height: number): Matrix {
+        return this._zero_as(Matrix, width, height);
+    }
+
+    eliminate_with(
+        eliminator: {
+            row: CoVector,
+            index: number,
+            value: number,
+            is_within?: boolean,
+        },
+    ): void {
+        for (let row of this.rows) {
+            if (eliminator.is_within && row == eliminator.row)
+                continue;
+            row.eliminate_with(eliminator);
+        }
+    }
+
+    add_from(
+        matrix: Matrix,
+        row_indices: {
+            start?: number,
+            end?: number,
+            map?: (index: number) => number | null,
+        } = {},
+        col_indices: {
+            start?: number,
+            end?: number,
+            map?: (index: number) => number | null,
+        } = {},
+    ): void {
+        let {start: row_start, end: row_end, map: row_index_map} = row_indices;
+        if (row_start === undefined || row_start < 0)
+            row_start = 0;
+        if (row_end === undefined || row_end > matrix.height)
+            row_end = matrix.height;
+        for (let row_index = row_start; row_index < row_end; ++row_index) {
+            let new_row_index = row_index_map === undefined ?
+                row_index : row_index_map(row_index);
+            if (new_row_index === null)
+                continue;
+            if (new_row_index < 0 || new_row_index >= this.height)
+                throw new DimensionError();
+            this.rows[new_row_index].add_from(
+                matrix.rows[row_index], col_indices );
+        }
+    }
+
+}
+
+export class QuadraticMatrix extends Matrix {
+
+    copy_matrix(): QuadraticMatrix {
+        return this._copy_as(QuadraticMatrix);
+    }
+
+    static from_dense(width: number, dense: Array<Array<number>>):
+        QuadraticMatrix
+    {
+        return this._from_dense_as(QuadraticMatrix, width, dense);
+    }
+
+    static zero(width: number): QuadraticMatrix {
+        return this._zero_as(QuadraticMatrix, width, width);
+    }
+
+    check_symmetric(): void {
+        const {width, height} = this;
+        if (width !== height)
+            throw new Error("Matrix shape is not symmetric");
+        if (this.rows.some(row => row.width != width))
+            throw new Error("Row shape is invalid");
+        let dense = this.as_dense();
+        for (let i = 0; i < width; ++i) {
+            for (let j = 0; j < width; ++j) {
+                if (Math.abs(dense[i][j] - dense[j][i]) > EPSILON)
+                    throw new Error("Matrix is not symmetric");
+            }
+        }
+    }
+
+    relative_to(vector: Vector): QuadraticMatrix {
+        const {width, height} = this;
+        let last_column_items = new Array<[number,number]>();
+        let relative = new QuadraticMatrix( this.width,
+            this.rows.map((row, index) => {
+                let relative_row = row.relative_to(vector);
+                let last_value = relative_row.get_value(width-1, true);
+                if (last_value !== null)
+                    last_column_items.push([index, last_value]);
+                return relative_row;
+            }) );
+        relative.rows[height-1] =
+            CoVector.from_items(width-1, last_column_items)
+                .relative_to(vector);
+        return relative;
+    }
+
+    eliminate_with(
+        eliminator: {
+            row: CoVector,
+            index: number,
+            value: number,
+        },
+    ): void {
+        let {
+            row: {indices: elim_indices, values: elim_values},
+            index: elim_index,
+        } = eliminator;
+        this.rows[elim_index].eliminate_with(eliminator, {
+            symmetrical: (jndex, increase) => {
+                if (jndex === elim_index)
+                    return;
+                this.rows[jndex].add_value(elim_index, increase);
+            },
+            eliminate_half: true,
+        });
+        this.rows[elim_index].scale(null);
+        for (let [index, row] of this.rows.entries()) {
+            row.eliminate_with(eliminator, {
+                symmetrical: (jndex, increase) => {
+                    if (jndex === elim_index)
+                        return;
+                    this.rows[jndex].add_value(index, increase);
+                }
+            });
+        }
+    }
+
+}
+
+export class GaussianReductor {
+    width: number;
+    matrix: Matrix;
+    consistent: boolean;
+    /** @property maps matrix row indices to their leader column indices */
+    row_leaders: Array<number | null>;
+    column_info: Array<{eliminated_by: number}|{image_index: number}>;
+    image_width: number;
+    image_column_map: Array<number>;
+
+    constructor(matrix: Matrix) {
+        const width = this.width = matrix.width - 1;
+        this.matrix = matrix;
+        this.consistent = true;
+        let row_leaders = this.row_leaders =
+            new Array<number | null>(this.matrix.height);
+        let column_info = this.column_info = new Array<(
+            {eliminated_by: number}|{image_index: number}
+        )>(this.width);
+        let eliminated_count = 0;
+        for (let [index, row] of matrix.rows.entries()) {
+            let leading_search = row.scale_extreme(0, width,
+                {objective: "abs", objective_sign: "any"} );
+            let leading_index: number | null = row_leaders[index] =
+                (leading_search === null) ? null : leading_search.index;
+            if (leading_index === null) {
+                let row_constant = row.get_value(width);
+                if (Math.abs(row_constant) > EPSILON) {
+                    this.consistent = false;
+                }
+                continue;
+            }
+            matrix.eliminate_with({
+                row, index: leading_index, value: 1, is_within: true });
+            column_info[leading_index] = {eliminated_by: index};
+            eliminated_count += 1;
+        }
+        let image_width = this.image_width = width - eliminated_count;
+        let image_column_map = this.image_column_map = new Array<number>();
+        let image_index = 0;
+        for (let i = 0; i < width; ++i) {
+            if (column_info[i] !== undefined)
+                continue;
+            column_info[i] = {image_index};
+            image_column_map[image_index] = i;
+            ++image_index;
+        }
+        if (image_index != image_width)
+            throw new Error("unreachable");
+    }
+
+    reduce_affine_linear(
+        this: GaussianReductor & {consistent: true},
+        affine_form: CoVector,
+    ): CoVector {
+        if (!this.consistent)
+            throw new Error(
+                "Reduction impossible: relations were inconsistent" );
+        const {width, image_width} = this;
+        if (affine_form.width != width + 1)
+            throw new DimensionError();
+        for (let [row_index, row_leader] of this.row_leaders.entries()) {
+            if (row_leader === null)
+                continue;
+            let row = this.matrix.rows[row_index];
+            affine_form.eliminate_with({row, index: row_leader, value: 1});
+        }
+        return CoVector.from_items( image_width + 1,
+            affine_form.map_items((index, value) => {
+                if (index >= width)
+                    return [image_width, value];
+                let col_info = this.column_info[index];
+                if ("eliminated_by" in col_info)
+                    throw new Error("unreachable");
+                return [col_info.image_index, value];
+            }) );
+    }
+
+    reduce_affine_quadratic(
+        this: GaussianReductor & {consistent: true},
+        affine_form: QuadraticMatrix,
+    ): QuadraticMatrix {
+        if (!this.consistent)
+            throw new Error(
+                "Reduction impossible: relations were inconsistent" );
+        const {width, image_width} = this;
+        if (affine_form.width != width + 1)
+            throw new DimensionError();
+        for (let [row_index, row_leader] of this.row_leaders.entries()) {
+            if (row_leader === null)
+                continue;
+            let row = this.matrix.rows[row_index];
+            affine_form.eliminate_with({row, index: row_leader, value: 1});
+        }
+        return new QuadraticMatrix( image_width + 1,
+            affine_form.rows
+                .filter( (_, index) => index >= width ||
+                    "image_index" in this.column_info[index] )
+                .map(row => CoVector.from_items( this.image_width + 1,
+                    row.map_items((index, value) => {
+                        if (index >= width)
+                            return [image_width, value];
+                        let col_info = this.column_info[index];
+                        if ("eliminated_by" in col_info)
+                            throw new Error("unreachable");
+                        return [col_info.image_index, value];
+                    }) ))
+        );
+    }
+
+    recover_vector( this: GaussianReductor & {consistent: true},
+        vector: Vector ): Vector
+    {
+        if (!this.consistent)
+            throw new Error(
+                "Recover impossible: relations were inconsistent" );
+        if (vector.height != this.image_width)
+            throw new DimensionError();
+        let new_vector = Vector.from_items( this.width,
+            function*(this: GaussianReductor): Iterable<[number,number]> {
+                for (let [index, value] of vector.iter_items()) {
+                    yield [this.image_column_map[index], value];
+                };
+            }.call(this) );
+        for (let [row_index, row_leader] of this.row_leaders.entries()) {
+            if (row_leader === null)
+                continue;
+            let row = this.matrix.rows[row_index];
+            new_vector.add_value(row_leader, -row.apply(new_vector));
+        }
+        return new_vector;
+    }
+}
+
+type ConsistentReductor = GaussianReductor & {consistent: true};
+type InconsistentReductor = GaussianReductor & {consistent: false};
+type MaybeConsistentReductor = ConsistentReductor | InconsistentReductor;
+
+export function test_gauss() {
+    const size = 4;
+    let reductor: MaybeConsistentReductor =
+        new GaussianReductor(Matrix.from_dense(size+1, [
+        [ 1,  1,  1,  1,  0],
+        [ 1,  1,  1,  1,  0],
+        [ 0,  0, 42,  0, 42],
+        [ 0,  0,  0,  1,  0],
+    ]));
+    if (!reductor.consistent)
+        return {reductor};
+    let qmatrix = QuadraticMatrix.from_dense( size+1, [
+        [1, 1, 1, 1, 1],
+        [1, 0, 0, 0, 1],
+        [1, 0, 0, 0, 1],
+        [1, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1],
+    ]);
+    qmatrix.check_symmetric();
+    let qmatrix_reduced = reductor.reduce_affine_quadratic(
+        qmatrix.copy_matrix() );
+    qmatrix_reduced.check_symmetric();
+    return {
+        reductor,
+        qmatrix, qmatrix_reduced,
+        qmatrix_reduces_expected: [[-1, 1], [1, 0]],
+    };
+}
+
+type Solution = Vector;
+type ErrorReport = {error: true, description: string};
+
+
+export class LPProblemSolver {
+    n: number;
+    k: number;
+    k0: number;
+    k1: number;
+    point: Vector;
+    row_indices: Array<(
+        {tableau_col: number, variable_col?: undefined} |
+        {variable_col: number, tableau_col?: undefined}
+    )>;
+    col_indices: {
+        constraint: Array<number|null>,
+        variable: Array<number|null>,
+    };
+    tableau: {
+        constraint: Matrix,
+        objective: CoVector,
+    };
+    result: null | Solution | ErrorReport;
+
+    static solve(
+        {
+            objective,
+            constraints_eq,
+            constraints_geq,
+        }: {
+            objective: CoVector,
+            constraints_eq: Matrix | null,
+            constraints_geq: Matrix,
+        }
+    ): Solution & {error?: false} | ErrorReport {
+        let reconstruct_solution: (solution: Solution) => Solution =
+            (solution) => solution;
+        if (constraints_eq !== null && constraints_eq.height > 0) {
+            let maybe_reductor: MaybeConsistentReductor =
+                new GaussianReductor(constraints_eq);
+            if (!maybe_reductor.consistent)
+                return { error: true,
+                    description: "Equations are inconsistent" };
+            let reductor = maybe_reductor;
+            reconstruct_solution =
+                (solution) => reductor.recover_vector(solution);
+            constraints_geq = new Matrix( reductor.image_width + 1,
+                constraints_geq.rows.map( row =>
+                    reductor.reduce_affine_linear(row.copy()) )
+            );
+            objective = reductor.reduce_affine_linear(objective.copy());
+        }
+        let feasible_point =
+            LPProblemSolver._find_feasible_point({ constraints:
+                constraints_geq });
+        if ("error" in feasible_point) {
+            return feasible_point;
+        }
+        let solution = new LPProblemSolver({
+            objective,
+            constraints: constraints_geq,
+            feasible_point,
+        }).get_solution();
+        if ("error" in solution)
+            return solution;
+        return reconstruct_solution(solution);
+    }
+
+    static solve_from_tokens(
+        objective: Token[],
+        target: "min",
+        constraints: Array<Token[]>,
+    ): {error?: false, solution: {[name: string]: number}} | ErrorReport {
+        let objective_expr = LinearExpression.from_tokens(objective);
+        let constraints_rels = constraints.map( tokens =>
+            LinearRelation.from_tokens(tokens) );
+        let
+            variables = new Array<string>(),
+            variable_set = new Set<string>();
+        let add_variable = (variable: string) => {
+            if (!variable_set.has(variable)) {
+                variables.push(variable);
+                variable_set.add(variable);
+            }
+        }
+        for (let variable of objective_expr.get_variables()) {
+            add_variable(variable);
+        }
+        for (let constraint of constraints_rels) {
+            for (let variable of constraint.get_variables()) {
+                add_variable(variable);
+            }
+        }
+        let indices: {[name: string]: number} = {};
+        for (let [index, name] of variables.entries()) {
+            indices[name] = index;
+        }
+        let n = variables.length;
+        let sparse_constraints = constraints_rels
+            .map(constraint => constraint.as_sparse_covector(n, indices));
+
+        let solution = LPProblemSolver.solve({
+            objective: objective_expr.as_sparse_covector(n, indices),
+            constraints_eq: new Matrix( n + 1,
+                sparse_constraints
+                    .filter(([,relation]) => relation === "eq")
+                    .map(([covector]) => covector),
+            ),
+            constraints_geq: new Matrix( n + 1,
+                sparse_constraints
+                    .filter(([,relation]) => relation === "geq")
+                    .map(([covector]) => covector),
+            ),
+        })
+        if (solution?.error) {
+            return solution;
+        }
+        if (solution.height != n) {
+            throw new Error("unreachable");
+        }
+        let successful = solution;
+        return {solution: Object.fromEntries(variables.map(
+            (name, index) => [name, successful.get_value(index)] ))};
+    }
+
+    constructor(
+        {
+            objective,
+            constraints,
+            feasible_point,
+        }: {
+            objective: CoVector,
+            constraints: Matrix,
+            feasible_point: Vector,
+        }
+    ) {
+        const n = this.n = objective.width - 1;
+        const k = this.k = constraints.height;
+        if (constraints.rows.some(row => row.width !== n + 1))
+            throw new DimensionError();
+        if (feasible_point.height !== n)
+            throw new DimensionError();
+
+        this.k0 = 0;
+        this.k1 = k;
+        this.point = feasible_point;
+        this.row_indices = new Array<{tableau_col: number}>();
+        this.col_indices = {
+            constraint: new Array<number>(k),
+            variable: new Array<null>(n),
+        }
+        this.tableau = {
+            constraint: ((): Matrix => {
+                let cstr_residual = new Matrix( n + 1,
+                    constraints.rows.map(row => {
+                        let r = row.relative_to(this.point);
+                        r.scale(-1);
+                        return r;
+                    }));
+                let tableau = Matrix.zero(k + n + 1, k);
+                tableau.add_from(cstr_residual, {}, { /* col indices */
+                    map: (index) => k + index,
+                });
+                for (let i = 0; i < k; ++i) {
+                    tableau.rows[i].add_value(i, 1);
+                }
+                return tableau;
+            })(),
+            objective: ((): CoVector => {
+                let obj_residual = objective.relative_to(this.point);
+                let objective_tableau = CoVector.from_items(k + n + 1, []);
+                objective_tableau.add_from(obj_residual, {
+                    map: (index) => k + index,
+                });
+                return objective_tableau;
+            })(),
+        };
+        this.col_indices.variable.fill(null);
+        for (let [index, ] of constraints.rows.entries()) {
+            this.row_indices.push({tableau_col: index});
+            this.col_indices.constraint.push(index);
+        }
+        this.result = null;
+    }
+
+    get_solution(): Solution & {error?: false} | ErrorReport {
+        while (this.result === null)
+            this._step();
+        return this.result;
+    }
+
+    static _find_feasible_point(
+        {constraints}: {constraints: Matrix}
+    ): Solution | ErrorReport {
+        const n = constraints.width - 1;
+        let point = Vector.zero(n);
+        let differences = constraints.rows.map(row => row.apply(point));
+        if (differences.every(d => d > -EPSILON))
+            return point;
+        let feasibility_initial = Vector.zero(n + 1);
+        feasibility_initial.add_value(0, -Math.min(...differences));
+        let feasibility_constraints = Matrix.zero(n + 2, constraints.height);
+        feasibility_constraints.add_from( constraints,
+            {}, {map: (index) => index + 1} );
+        for (let constraint of feasibility_constraints.rows) {
+            constraint.set_value(0, 1);
+        }
+        let feasibility_objective = CoVector.zero(n + 2);
+        feasibility_objective.set_value(0, 1);
+        feasibility_constraints.rows.push(feasibility_objective);
+        let feasibility_solution = new LPProblemSolver({
+            objective: feasibility_objective,
+            constraints: feasibility_constraints,
+            feasible_point: feasibility_initial,
+        }).get_solution();
+        if (feasibility_solution.error) {
+            return feasibility_solution;
+        }
+        if (feasibility_solution.get_value(0) > EPSILON) {
+            return {error: true, description: "Infeasible"};            
+        }
+        let feasible_point = Vector.zero(n);
+        feasible_point.add_from( feasibility_solution,
+            {start: 1, map: (index) => index - 1} );
+        // XXX debug
+        for (let constraint of constraints.rows) {
+            if (constraint.apply(feasible_point) < -EPSILON) {
+                throw new Error("Feasible point is not actually feasible");
+            }
+        }
+        return feasible_point;
+    }
+
+    _step(): void {
+        const {n, k} = this;
+        let obj_tableau = this.tableau.objective;
+        for (let [index, value] of obj_tableau.iter_items(k, k + n)) {
+            if (Math.abs(value) < EPSILON)
+                continue;
+            return this._step_enter(index - k, value > 0 ? -1 : +1);
+        }
+        for (let [index, value] of obj_tableau.iter_items(0, k)) {
+            if (value > -EPSILON)
+                continue;
+            return this._step_exit(index);
+        }
+        this.result = this.point;
+    }
+
+    _step_enter(
+        entering_var_index: number,
+        entering_var_sign: 1 | -1,
+    ): void {
+        const {n, k} = this;
+        let
+            entering_vector: Vector,
+            constraint_vector = Vector.zero(k),
+            objective_vector: number,
+            entering: {index: number, cstr_index: number} | null = null,
+            vector_scale: number = Infinity;
+        { // find entering index
+            let entering_vector_base = Vector.zero(n);
+            entering_vector_base.set_value(
+                entering_var_index, entering_var_sign );
+            objective_vector =
+                this.tableau.objective.apply( entering_vector_base,
+                    {start_offset: k, const_factor: 0} );
+            entering_vector = entering_vector_base.copy();
+            for (let [index, index_info] of this.row_indices.entries()) {
+                let row = this.tableau.constraint.rows[index];
+                if (index_info.variable_col !== undefined) {
+                    entering_vector.add_value(index_info.variable_col, 
+                        -row.apply( entering_vector_base,
+                            {start_offset: k, const_factor: 0} )
+                    );
+                    continue;
+                }
+                let entering_speed = -row.apply( entering_vector_base,
+                    {start_offset: k, const_factor: 0} );
+                constraint_vector.add_value(index, entering_speed);
+                if (entering_speed > -EPSILON)
+                    continue;
+                let margin = -row.get_value(k + n);
+                if (margin < -EPSILON)
+                    throw new Error("unreachable");
+                if (margin < EPSILON) {
+                    // Bland's rule, kinda
+                    if (
+                        entering !== null &&
+                        vector_scale === 0 &&
+                        index_info.tableau_col > entering.cstr_index
+                    ) {
+                        continue;
+                    }
+                    vector_scale = 0;
+                    entering = { index,
+                        cstr_index: index_info.tableau_col };
+                    continue;
+                }
+                let scale = margin / -entering_speed;
+                if (scale < -EPSILON) {
+                    throw new Error("unreachable");
+                }
+                if (scale < vector_scale - EPSILON) {
+                    vector_scale = scale;
+                    entering = { index,
+                        cstr_index: index_info.tableau_col };
+                }
+            }
+        }
+        if (entering === null) {
+            this.result = {error: true, description: "Unbounded"};
+            return;
+        }
+        let entering_index = entering.index;
+        if (!isFinite(vector_scale))
+            throw new Error("unreachable");
+
+        // shift the point
+        for (let [index, value] of constraint_vector.iter_items()) {
+            this.tableau.constraint.rows[index]
+                .add_value(k + n, vector_scale * -value);
+        }
+        this.tableau.objective
+            .add_value(k + n, vector_scale * objective_vector);
+        this.point.add_items( entering_vector
+            .map_items((index, value) => [index, vector_scale * value]) )
+
+        let entering_row = this.tableau.constraint.rows[entering_index];
+        // XXX debug
+        if (Math.abs(entering_row.get_value(k + n)) > EPSILON) {
+            throw new Error("unreachable")
+        }
+        entering_row.set_value(k + n, null);
+
+        entering_row.scale_index(k + entering_var_index);
+        this.tableau.constraint.eliminate_with({
+            row: entering_row, index: k + entering_var_index, value: 1,
+            is_within: true });
+        this.tableau.objective.eliminate_with({
+            row: entering_row, index: k + entering_var_index, value: 1 });
+
+        this.col_indices.constraint[entering.cstr_index] = null;
+        this.col_indices.variable[entering_var_index] = entering_index;
+        this.row_indices[entering_index] = {variable_col: entering_var_index};
+
+        this.k0 += 1;
+        this.k1 -= 1;
+    }
+
+    _step_exit(
+        leaving_cstr_index: number,
+    ): void {
+        const {n, k} = this;
+        let leaving: {index: number, var_index: number} | null = null;
+        { // find leaving row
+            for (let [index, index_info] of this.row_indices.entries()) {
+                if (index_info.tableau_col !== undefined) {
+                    continue;
+                }
+                let row = this.tableau.constraint.rows[index];
+                let value = row.get_value(leaving_cstr_index, true);
+                if (value === null || Math.abs(value) < EPSILON)
+                    continue;
+                // Bland's rule, kinda
+                if ( leaving !== null &&
+                    index_info.variable_col > leaving.var_index
+                ) {
+                    continue;
+                }
+                leaving = { index,
+                    var_index: index_info.variable_col };
+                continue;
+            }
+        }
+        if (leaving === null)
+            throw new Error("unreachable");
+
+        let leaving_index = leaving.index;
+        let leaving_row = this.tableau.constraint.rows[leaving_index];
+        leaving_row.scale_index(leaving_cstr_index);
+        this.tableau.constraint.eliminate_with({
+            row: leaving_row, index: leaving_cstr_index, value: 1,
+            is_within: true });
+        this.tableau.objective.eliminate_with({
+            row: leaving_row, index: leaving_cstr_index, value: 1 });
+
+        this.col_indices.constraint[leaving_cstr_index] = leaving_index;
+        this.col_indices.variable[leaving.var_index] = null;
+        this.row_indices[leaving_index] = {tableau_col: leaving_cstr_index};
+
+        this.k0 -= 1;
+        this.k1 += 1;
+    }
+}
+
+/* QPProblemSolver draft
+class QPProblemSolver {
+    n: number;
+    k: number;
+    k0: number;
+    k1: number;
+    point: Vector;
+    row_indices: Array<{tableau_col: number}|{residual_col: number}>;
+    col_indices: {
+        constraint: Array<number|null>,
+        variable: Array<number|null>,
+    };
+    tableau: {
+        constraint: Matrix,
+        objective: QuadraticMatrix,
+    };
+    result: null | Solution | ErrorReport;
+
+    static solve(
+        {
+            objective,
+            constraints_eq,
+            constraints_geq,
+        }: {
+            objective: QuadraticMatrix,
+            constraints_eq: Matrix,
+            constraints_geq: Matrix,
+        }
+    ): Solution | ErrorReport {
+        if (constraints_eq.height > 0) {
+            return …;
+        }
+        let feasible_point =
+            QPProblemSolver._find_feasible_point({constraints_geq});
+        if ("error" in feasible_point) {
+            return feasible_point;
+        }
+        return new QPProblemSolver({
+            objective,
+            constraints: constraints_geq,
+            feasible_point,
+        }).get_solution();
+    }
+
+    constructor(
+        {
+            objective,
+            constraints,
+            feasible_point,
+        }: {
+            objective: QuadraticMatrix,
+            constraints: Matrix,
+            feasible_point: Vector,
+        }
+    ) {
+        const n = this.n = objective.width - 1;
+        const k = this.k = constraints.height;
+
+        this.k0 = 0;
+        this.k1 = k;
+        this.point = feasible_point;
+        this.row_indices = new Array<{tableau_col: number}>();
+        this.col_indices = {
+            constraint: new Array<number>(k),
+            variable: new Array<null>(n),
+        }
+        this.tableau = {
+            constraint: new Matrix(k + n + 1, constraints.rows.map(
+                (constraint, jndex) => CoVector.from_items(k + n + 1, [
+                    [jndex, 1],
+                    ...constraint.map_items<[number,number]>(
+                        (index, value) => [ index + k, index < n
+                            ? -value
+                            : -constraint.apply(this.point) ]
+                    ),
+                ])
+            )),
+            objective: new QuadraticMatrix(k + n + 1, [
+                ...constraints.rows
+                    .map(() => CoVector.from_items(k + n + 1, [])),
+                ...(objective.relative_to(this.point).rows
+                .map<CoVector>((row) => CoVector.from_items(
+                    k + n + 1,
+                    row.map_items<[number,number]>(
+                        (index, value) => [index + k, value]
+                    )
+                ))),
+            ]),
+        };
+        this.col_indices.variable.fill(null);
+        for (let [index, ] of constraints.rows.entries()) {
+            this.row_indices.push({tableau_col: index});
+            this.col_indices.constraint.push(index);
+        }
+        this.result = null;
+    }
+
+    get_solution(): Solution | ErrorReport {
+        while (this.result === null)
+            this._step();
+        return this.result;
+    }
+
+    static _find_feasible_point(
+        {
+            constraints_geq,
+        }: {
+            constraints_geq: Matrix,
+        }
+    ): Solution | ErrorReport {
+        return …;
+    }
+
+    _step(): void {
+        …;
+    }
+}
+
+export function solve_qproblem() {
+    return …;
+}
+*/
+
 } // end namespace
+
+} // end namespace
+
 
 // replacement for js-lp-solver
 var solver = {
@@ -1610,7 +2036,7 @@ Solve: function Solve(model: LPModel): { [s: string]: any; } {
             constraints.push([constr_name, ">=", constr_limits.min]);
         }
     }
-    let solution = Algebra.LPProblem.solve_from_tokens(
+    let solution = Algebra.Sparse.LPProblemSolver.solve_from_tokens(
         objective,
         "min",
         constraints,
