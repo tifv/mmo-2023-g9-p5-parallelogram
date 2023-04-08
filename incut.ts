@@ -606,6 +606,9 @@ class HeightedFaceGraph extends PlanarGraph {
         }
     }
 
+    /** XXX face-edge relation is kinda redundant; replace it with the
+     *  direct face-face relation. */
+
     relative_edge_faces(edge: Edge):
         {above: Polygon | null, below: Polygon | null}
     {
