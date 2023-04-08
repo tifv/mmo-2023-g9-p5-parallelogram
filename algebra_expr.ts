@@ -2,189 +2,9 @@ namespace Algebra {
 
 export namespace Expression {
 
-export class AffineFunction {
-    coefficients: {[name: string]: number}
-    constant: number;
-
-    constructor(
-        coefficients: {[name: string]: number},
-        constant: number
-    ) {
-        this.coefficients = coefficients;
-        this.constant = constant;
-    }
-
-    negate(): AffineFunction {
-        return this.scale(-1);
-    }
-    plus(other: AffineFunction): AffineFunction {
-        let coefficients = Object.fromEntries(
-            Object.entries(this.coefficients) );
-        for (let [name, value] of Object.entries(other.coefficients)) {
-            coefficients[name] = (coefficients[name] || 0) + value;
-        }
-        return new AffineFunction( coefficients,
-            this.constant + other.constant );
-    }
-    scale(value: number): AffineFunction {
-        return new AffineFunction(
-            Object.fromEntries(
-                Object.entries(this.coefficients).map(
-                    ([name, coefficient]) => [name, value * coefficient] )
-            ),
-            value * this.constant,
-        );
-    }
-
-    as_constant(): number | null {
-        if (Object.values(this.coefficients).length == 0) {
-            return this.constant;
-        }
-        return null;
-    }
-
-    static from_ast(ast: ASTExpression): AffineFunction {
-        if (ast instanceof ASTConstant) {
-            return new AffineFunction({}, ast.value);
-        }
-        if (ast instanceof ASTVariable) {
-            return new AffineFunction({[ast.name]: 1}, 0);
-        }
-        if (ast instanceof ASTAdd) {
-            return this.from_ast(ast.left).plus(
-                this.from_ast(ast.right) );
-        }
-        if (ast instanceof ASTSub) {
-            return this.from_ast(ast.left).plus(
-                this.from_ast(ast.right).negate() );
-        }
-        if (ast instanceof ASTNeg) {
-            return this.from_ast(ast.value).negate();
-        }
-        if (ast instanceof ASTMul) {
-            let
-                left = this.from_ast(ast.left),
-                right = this.from_ast(ast.right);
-            let
-                left_const = left.as_constant(),
-                right_const = right.as_constant();
-            if (left_const !== null) {
-                return right.scale(left_const);
-            }
-            if (right_const !== null) {
-                return left.scale(right_const);
-            }
-            throw new Error("Cannot build any quadratic expression");
-        }
-        if (ast instanceof ASTDiv) {
-            let
-                left = this.from_ast(ast.left),
-                right = this.from_ast(ast.right);
-            let
-                right_const = right.as_constant();
-            if (right_const === null) {
-                throw new Error("Cannot build a fractional expression");
-            }
-            if (Math.abs(right_const) < EPSILON) {
-                throw new Error("Cannot divide by zero");
-            }
-            return left.scale(1 / right_const);
-        }
-        throw new Error("Unrecognized AST expression node");
-    }
-
-    static from_tokens(tokens: Array<Token>): AffineFunction {
-        let ast = parse_tokens(tokens);
-        if (!(ast instanceof ASTExpression))
-            throw new Error("Can only parse an expression");
-        return this.from_ast(ast);
-    }
-
-    *get_variables(): IterableIterator<string> {
-        yield* Object.keys(this.coefficients);
-    }
-
-    as_sparse_covector(n: number, indices: {[name: string]: number}):
-        Sparse.CoVector
-    {
-        let covector = Sparse.CoVector.zero(n + 1);
-        for (let [name, value] of Object.entries(this.coefficients)) {
-            covector.set_value(indices[name], value);
-        }
-        if (Math.abs(this.constant) > 0)
-            covector.set_value(n, this.constant);
-        return covector;
-    }
-}
-
-export class AffineRelation {
-    left: AffineFunction;
-    relation: "eq" | "geq";
-
-    constructor(
-        left: AffineFunction,
-        relation: "eq" | "geq" | "leq",
-    ) {
-        if (relation == "leq") {
-            left = left.negate();
-            relation = "geq";
-        }
-        this.left = left;
-        this.relation = relation;
-    }
-
-    static from_left_right(
-        left: AffineFunction,
-        relation: "eq" | "geq" | "leq",
-        right: AffineFunction,
-    ): AffineRelation {
-        return new AffineRelation(left.plus(right.negate()), relation);
-    }
-
-    static from_ast(ast: ASTRelation): AffineRelation {
-        if (ast instanceof ASTGEq) {
-            let
-                left = AffineFunction.from_ast(ast.left),
-                right = AffineFunction.from_ast(ast.right);
-            return new AffineRelation(left.plus(right.negate()), "geq");
-        }
-        if (ast instanceof ASTLEq) {
-            let
-                left = AffineFunction.from_ast(ast.left),
-                right = AffineFunction.from_ast(ast.right);
-            return new AffineRelation(left.plus(right.negate()), "leq");
-        }
-        if (ast instanceof ASTXEq) {
-            let
-                left = AffineFunction.from_ast(ast.left),
-                right = AffineFunction.from_ast(ast.right);
-            return new AffineRelation(left.plus(right.negate()), "eq");
-        }
-        throw new Error("Unrecognized AST node");
-    }
-
-    static from_tokens(tokens: Array<Token>): AffineRelation {
-        let ast = parse_tokens(tokens)
-        if (!(ast instanceof ASTRelation))
-            throw new Error("Can only parse a relation");
-        return this.from_ast(ast);
-    }
-
-    *get_variables(): IterableIterator<string> {
-        yield* this.left.get_variables();
-    }
-
-    as_sparse_covector(n: number, indices: {[name: string]: number}):
-        [Sparse.CoVector, "eq" | "geq"]
-    {
-        return [
-            this.left.as_sparse_covector(n, indices),
-            this.relation
-        ];
-    }
-}
-
 export type Token = string | number;
+export type Tokens = Array<Token>;
+
 const enum ExprLevel {
     GROUP = 10,
     REL = 20,
@@ -206,7 +26,7 @@ type AddOp = Operation.ADD | Operation.SUB;
 type MulOp = Operation.MUL | Operation.DIV;
 type UnaryOp = AddOp;
 
-function parse_tokens(tokens: Array<Token>): ASTNode {
+function parse_tokens(tokens: Tokens): ASTNode {
     type Context = (
         {level: ExprLevel.GROUP, node: null, op: null} |
         {level: ExprLevel.REL, node: ASTNode, op: RelOp | null} |
@@ -323,7 +143,7 @@ function parse_tokens(tokens: Array<Token>): ASTNode {
                 rel_node = new ASTLEq(context.node, node);
                 break;
             case Operation.XEQ:
-                rel_node = new ASTXEq(context.node, node);
+                rel_node = new ASTEq(context.node, node);
                 break;
         }
         let rel_context: Context & {level: ExprLevel.REL} =
@@ -520,22 +340,21 @@ function parse_tokens(tokens: Array<Token>): ASTNode {
     return rel_context.node;
 }
 
-type NodeType = "expression" | "relation"
+const EXPR_TYPE = Symbol();
 
-class ASTNode {
-    // effectively suppress structural subtyping
-    get _node_type(): NodeType {
-        throw new Error("not implemented");
-    }
-};
+type ASTNode = ASTExpression | ASTRelation;
 
-class ASTExpression extends ASTNode {
-    get _node_type(): "expression" {
+type ASTExpression = (
+    ASTConstant | ASTVariable | ASTUnary | ASTBinary
+) & {[EXPR_TYPE]: "expression"};
+
+class ASTExpressionClass {
+    get [EXPR_TYPE](): "expression" {
         return "expression";
     }
 };
 
-class ASTConstant extends ASTExpression {
+class ASTConstant extends ASTExpressionClass {
     value: number;
     constructor(value: number) {
         super();
@@ -543,7 +362,7 @@ class ASTConstant extends ASTExpression {
     }
 }
 
-class ASTVariable extends ASTExpression {
+class ASTVariable extends ASTExpressionClass {
     name: string;
     constructor(name: string) {
         super();
@@ -551,26 +370,28 @@ class ASTVariable extends ASTExpression {
     }
 }
 
-class ASTUnary extends ASTExpression {
+type ASTUnary = ASTNeg;
+class ASTUnaryBase extends ASTExpressionClass {
     value: ASTExpression;
     constructor(value: ASTNode) {
         super();
-        if (!(value instanceof ASTExpression))
+        if (!(value instanceof ASTExpressionClass))
             throw new Error("Unary operator applied to non-expression.");
         this.value = value;
     }
 }
 
-class ASTNeg extends ASTUnary {}
+class ASTNeg extends ASTUnaryBase {}
 
-class ASTBinary extends ASTExpression {
+type ASTBinary = ASTAdd | ASTSub | ASTMul | ASTDiv;
+class ASTBinaryBase extends ASTExpressionClass {
     left: ASTExpression;
     right: ASTExpression;
     constructor(left: ASTNode, right: ASTNode) {
         super();
         if (
-            !(left instanceof ASTExpression) ||
-            !(right instanceof ASTExpression)
+            !(left instanceof ASTExpressionClass) ||
+            !(right instanceof ASTExpressionClass)
         )
             throw new Error("Binary operator applied to non-expressions.");
         this.left = left;
@@ -578,24 +399,27 @@ class ASTBinary extends ASTExpression {
     }
 }
 
-class ASTAdd extends ASTBinary {};
-class ASTSub extends ASTBinary {};
+class ASTAdd extends ASTBinaryBase {};
+class ASTSub extends ASTBinaryBase {};
 
-class ASTMul extends ASTBinary {};
-class ASTDiv extends ASTBinary {};
+class ASTMul extends ASTBinaryBase {};
+class ASTDiv extends ASTBinaryBase {};
 
-class ASTRelation extends ASTNode {
-    get _node_type(): "relation" {
+type ASTRelation = (
+    ASTGEq | ASTLEq | ASTEq
+) & {[EXPR_TYPE]: "relation"};
+
+class ASTRelationClass {
+    get [EXPR_TYPE](): "relation" {
         return "relation";
     }
 
     left: ASTExpression;
     right: ASTExpression;
     constructor(left: ASTNode, right: ASTNode) {
-        super();
         if (
-            !(left instanceof ASTExpression) ||
-            !(right instanceof ASTExpression)
+            !(left instanceof ASTExpressionClass) ||
+            !(right instanceof ASTExpressionClass)
         )
             throw new Error("Relation applied to non-expressions.");
         this.left = left;
@@ -603,9 +427,191 @@ class ASTRelation extends ASTNode {
     }
 }
 
-class ASTGEq extends ASTRelation {};
-class ASTLEq extends ASTRelation {};
-class ASTXEq extends ASTRelation {};
+class ASTGEq extends ASTRelationClass {};
+class ASTLEq extends ASTRelationClass {};
+class ASTEq extends ASTRelationClass {};
+
+export class AffineFunction {
+    coefficients: {[name: string]: number}
+    constant: number;
+
+    constructor(
+        coefficients: {[name: string]: number},
+        constant: number
+    ) {
+        this.coefficients = coefficients;
+        this.constant = constant;
+    }
+
+    negate(): AffineFunction {
+        return this.scale(-1);
+    }
+    plus(other: AffineFunction): AffineFunction {
+        let coefficients = Object.fromEntries(
+            Object.entries(this.coefficients) );
+        for (let [name, value] of Object.entries(other.coefficients)) {
+            coefficients[name] = (coefficients[name] || 0) + value;
+        }
+        return new AffineFunction( coefficients,
+            this.constant + other.constant );
+    }
+    scale(value: number): AffineFunction {
+        return new AffineFunction(
+            Object.fromEntries(
+                Object.entries(this.coefficients).map(
+                    ([name, coefficient]) => [name, value * coefficient] )
+            ),
+            value * this.constant,
+        );
+    }
+
+    as_constant(): number | null {
+        if (Object.values(this.coefficients).length == 0) {
+            return this.constant;
+        }
+        return null;
+    }
+
+    static from_ast(ast: ASTExpression): AffineFunction {
+        if (ast instanceof ASTConstant) {
+            return new AffineFunction({}, ast.value);
+        }
+        if (ast instanceof ASTVariable) {
+            return new AffineFunction({[ast.name]: 1}, 0);
+        }
+        if (ast instanceof ASTAdd) {
+            return this.from_ast(ast.left).plus(
+                this.from_ast(ast.right) );
+        }
+        if (ast instanceof ASTSub) {
+            return this.from_ast(ast.left).plus(
+                this.from_ast(ast.right).negate() );
+        }
+        if (ast instanceof ASTNeg) {
+            return this.from_ast(ast.value).negate();
+        }
+        if (ast instanceof ASTMul) {
+            let
+                left = this.from_ast(ast.left),
+                right = this.from_ast(ast.right);
+            let
+                left_const = left.as_constant(),
+                right_const = right.as_constant();
+            if (left_const !== null) {
+                return right.scale(left_const);
+            }
+            if (right_const !== null) {
+                return left.scale(right_const);
+            }
+            throw new Error("Cannot build any quadratic expression");
+        }
+        if (ast instanceof ASTDiv) {
+            let
+                left = this.from_ast(ast.left),
+                right = this.from_ast(ast.right);
+            let
+                right_const = right.as_constant();
+            if (right_const === null) {
+                throw new Error("Cannot build a fractional expression");
+            }
+            if (Math.abs(right_const) < EPSILON) {
+                throw new Error("Cannot divide by zero");
+            }
+            return left.scale(1 / right_const);
+        }
+        throw new Error("Unrecognized AST expression node");
+    }
+
+    static from_tokens(tokens: Tokens): AffineFunction {
+        let ast = parse_tokens(tokens);
+        if (!(ast instanceof ASTExpressionClass))
+            throw new Error("Can only parse an expression");
+        return this.from_ast(ast);
+    }
+
+    *get_variables(): IterableIterator<string> {
+        yield* Object.keys(this.coefficients);
+    }
+
+    as_sparse_covector(n: number, indices: {[name: string]: number}):
+        Sparse.CoVector
+    {
+        let covector = Sparse.CoVector.zero(n + 1);
+        for (let [name, value] of Object.entries(this.coefficients)) {
+            covector.set_value(indices[name], value);
+        }
+        if (Math.abs(this.constant) > 0)
+            covector.set_value(n, this.constant);
+        return covector;
+    }
+}
+
+export class AffineRelation {
+    left: AffineFunction;
+    relation: "eq" | "geq";
+
+    constructor(
+        left: AffineFunction,
+        relation: "eq" | "geq" | "leq",
+    ) {
+        if (relation == "leq") {
+            left = left.negate();
+            relation = "geq";
+        }
+        this.left = left;
+        this.relation = relation;
+    }
+
+    static from_left_right(
+        left: AffineFunction,
+        relation: "eq" | "geq" | "leq",
+        right: AffineFunction,
+    ): AffineRelation {
+        return new AffineRelation(left.plus(right.negate()), relation);
+    }
+
+    static from_ast(ast: ASTRelationClass): AffineRelation {
+        if (ast instanceof ASTGEq) {
+            let
+                left = AffineFunction.from_ast(ast.left),
+                right = AffineFunction.from_ast(ast.right);
+            return new AffineRelation(left.plus(right.negate()), "geq");
+        }
+        if (ast instanceof ASTLEq) {
+            let
+                left = AffineFunction.from_ast(ast.left),
+                right = AffineFunction.from_ast(ast.right);
+            return new AffineRelation(left.plus(right.negate()), "leq");
+        }
+        if (ast instanceof ASTEq) {
+            let
+                left = AffineFunction.from_ast(ast.left),
+                right = AffineFunction.from_ast(ast.right);
+            return new AffineRelation(left.plus(right.negate()), "eq");
+        }
+        throw new Error("Unrecognized AST node");
+    }
+
+    static from_tokens(tokens: Tokens): AffineRelation {
+        let ast = parse_tokens(tokens)
+        if (!(ast instanceof ASTRelationClass))
+            throw new Error("Can only parse a relation");
+        return this.from_ast(ast);
+    }
+
+    *get_variables(): IterableIterator<string> {
+        yield* this.left.get_variables();
+    }
+
+    as_sparse_covector(n: number, indices: {[name: string]: number}):
+        [Sparse.CoVector, "eq" | "geq"]
+    {
+        return [
+            this.left.as_sparse_covector(n, indices),
+            this.relation
+        ];
+    }
+}
 
 }
 
