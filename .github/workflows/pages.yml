@@ -20,7 +20,7 @@ jobs:
     needs: [install_typescript]
     steps:
     - run: mkdir build
-    - run: tsc
+    - run: tsc --project .
   complete_project:
     name: Complete site installation
     runs-on: ubuntu-latest
