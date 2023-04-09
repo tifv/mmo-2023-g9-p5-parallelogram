@@ -3,6 +3,8 @@ on:
   push:
     branches:
     - publish
+  page_build:
+  workflow_dispatch:
 jobs:
   install_typescript:
     name: Install TypeScript
