@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 jobs:
   build:
-    name: Compile TypeScript files
+    name: Build project
     runs-on: ubuntu-latest
     defaults:
       run:
