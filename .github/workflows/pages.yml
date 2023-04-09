@@ -25,10 +25,10 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v3
-    - run: mkdir build
+    - run: mkdir ./build
     - name: Compile
       run: tsc --project .
-    - run: cp parallelogram.html build/index.html
+    - run: cp parallelogram.html ./build/index.html
   upload:
     name: Upload build artifact
     needs: [compile]
@@ -36,6 +36,8 @@ jobs:
     steps:
     - name: Upload
       uses: actions/upload-pages-artifact@v1
+      with:
+        path: ./build
   deploy:
     name: Deploy to GitHub Pages
     needs: [upload]
