@@ -27,7 +27,12 @@ function build_uncut_region(): UncutRegion {
 
 function main() {
     const {M, r} = POLYGON_SIZE;
-    let canvas_svg = document.getElementById('canvas');
+    let canvas_svg: SVGSVGElement; {
+         let element = <SVGSVGElement|null>document.getElementById('canvas');
+         if (element === null)
+            throw new Error("Canvas element not found");
+        canvas_svg = element;
+    };
     if (canvas_svg === null || ! (canvas_svg instanceof SVGSVGElement))
         throw new Error();
     let canvas = new Canvas(canvas_svg);
@@ -38,6 +43,74 @@ function main() {
     set_canvas_viewBox();
     let uncut_region = build_uncut_region();
 
+    let triangle1: SVGPathElement, triangle2: SVGPathElement;
+
+    let drag = {
+        current: <(
+            {triangle: 1|2, start_offset: Vector}
+        )|null> null,
+        get_mouse_coords: (event: MouseEvent | TouchEvent): Point => {
+            let ctm = canvas_svg.getScreenCTM();
+            if (ctm === null)
+                throw new Error("no fucking way this is reachable");
+            let pointer = event instanceof MouseEvent ?
+                event : event.touches[0];
+            return new Point(
+                +(pointer.clientX - ctm.e) / ctm.a,
+                -(pointer.clientY - ctm.f) / ctm.d,
+            );
+        },
+        start: (event: MouseEvent | TouchEvent) => {
+            let target = event.target;
+            let triangle: 1|2;
+            if (target === triangle1) {
+                triangle = 1;
+            } else if (target === triangle2) {
+                triangle = 2;
+            } else {
+                return;
+            }
+            if (event instanceof MouseEvent)
+                event.preventDefault();
+            let point = triangle === 1 ?
+                uncut_region.point1 : uncut_region.point2;
+            drag.current = { triangle, start_offset:
+                Vector.between(drag.get_mouse_coords(event), point) };
+        },
+        move: (event: MouseEvent | TouchEvent) => {
+            if (drag.current === null)
+                return;
+            if (event instanceof MouseEvent)
+                event.preventDefault();
+            let point = drag.get_mouse_coords(event).shift(
+                drag.current.start_offset );
+            if (drag.current.triangle === 1) {
+                let {point1} = uncut_region.find_nearest_feasible(
+                    {close: point}, {exact: true} );
+                uncut_region.point1 = point1;
+                reload();
+            } else {
+                let {point2} = uncut_region.find_nearest_feasible(
+                    {exact: true}, {close: point} );
+                uncut_region.point2 = point2;
+                reload();
+            }
+        },
+        end: (event: Event) => {
+            if (drag.current === null)
+                return;
+            drag.current = null;
+        },
+    };
+    document.body.addEventListener('mousemove'  , drag.move );
+    document.body.addEventListener('touchmove'  , drag.move );
+    document.body.addEventListener('mouseup'    , drag.end  );
+    document.body.addEventListener('mouseleave' , drag.end  );
+    document.body.addEventListener('touchend'   , drag.end  );
+    document.body.addEventListener('touchleave' , drag.end  );
+    document.body.addEventListener('touchcancel', drag.end  );
+
+
     let reload = () => {
         let elements = Array.from(canvas.svg.children).filter(
             element => (['path', 'circle'].indexOf(element.tagName) >= 0) )
@@ -46,9 +119,13 @@ function main() {
         }
         let flows = uncut_region.find_flows();
         let cut_region = construct_cut_region(uncut_region, flows);
-        canvas.draw_cut_region(cut_region);
+        ({triangle1, triangle2} = canvas.draw_cut_region(cut_region));
+        triangle1.addEventListener('mousedown' , drag.start);
+        triangle1.addEventListener('touchstart', drag.start);
+        triangle2.addEventListener('mousedown' , drag.start);
+        triangle2.addEventListener('touchstart', drag.start);
     }
-    canvas.svg.addEventListener('click', reload);
+
     reload();
 };
 
@@ -166,6 +243,7 @@ function main_debug_try(canvas: Canvas) {
 type FillDrawOptions = {
     classes?: string[],
     style?: {[name: string]: string},
+    attributes?: {[name: string]: string},
 };
 
 class Canvas {
@@ -180,12 +258,12 @@ class Canvas {
     }
     draw_edge(edge: Edge, options?: FillDrawOptions): SVGPathElement {
         return makesvg('path', {
-            attributes: {
+            attributes: Object.assign({
                 d: [
                     "M", edge.start.x, -edge.start.y,
                     "L", edge.end  .x, -edge.end  .y,
                 ].join(" "),
-            },
+            }, options?.attributes),
             classes: options?.classes,
             style: options?.style,
             parent: this.svg,
@@ -203,7 +281,7 @@ class Canvas {
         return makesvg('path', {
             attributes: Object.assign({
                 d: path_items.join(" "),
-            }),
+            }, options?.attributes),
             classes: options?.classes,
             style: options?.style,
             parent: this.svg,
@@ -233,22 +311,31 @@ class Canvas {
     }
     draw_cut_region(region: CutRegion) {
         let mask = new Set<Edge|Polygon>();
-        let do_border_face = (polygon: Polygon, options?: FillDrawOptions) => {
-            this.draw_polygon(polygon, options);
-            for (let edge of polygon)
-                mask.add(edge);
-        }
+        let do_border_face =
+            (polygon: Polygon, options?: FillDrawOptions): SVGPathElement => {
+                let drawn_path = this.draw_polygon(polygon, options);
+                for (let edge of polygon)
+                    mask.add(edge);
+                return drawn_path
+            };
         do_border_face(region.outer_face, {classes:
             ["face", "face__outer", "border", "face__border"] });
-        do_border_face(region.triangle1, {classes:
-            ["start_obj", "face", "border", "face__border"] });
-        do_border_face(region.triangle2, {classes:
-            ["end_obj", "face", "border", "face__border"] });
+        let triangle1 = do_border_face(region.triangle1, {
+            classes:
+                ["start_obj", "face", "border", "face__border"],
+            attributes: {id: "triangle1"},
+        });
+        let triangle2 = do_border_face(region.triangle2, {
+            classes:
+                ["end_obj", "face", "border", "face__border"],
+            attributes: {id: "triangle2"},
+        });
         for (let edge of region.graph.edges) {
             if (mask.has(edge))
                 continue;
             this.draw_edge(edge, {classes: ["edge"]});
         }
+        return {triangle1, triangle2};
     }
     draw_graph(
         graph: Graphs.GraphLike,

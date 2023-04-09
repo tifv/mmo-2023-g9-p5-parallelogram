@@ -4,6 +4,13 @@
     body {
         text-align: center;
     }
+    svg {
+        width: clamp(100px, min(80vw, 80vh), 1000px);
+        aspect-ratio: 1 / 1;
+    }
+    #triangle1, #triangle2 {
+        cursor: move;
+    }
 </style>
     </head>
     <body>
@@ -12,11 +19,8 @@
             id="canvas"
         >
 <style>
-    svg {
-        width: clamp(100px, min(80vw, 80vh), 1000px);
-        aspect-ratio: 1 / 1;
-        cursor: pointer;
-    }
+    /* svg {
+    } */
     :is(path), :is(circle) {
         --main-stroke-color: black;
         --main-fill-color: blue;

@@ -328,7 +328,7 @@ class Incutter {
                 let
                     image = height <= EPSILON ? vertex : vertex.shift(
                         new DirectedVector(this.direction, height) ),
-                    projection = Graphs.Vector.from_points(this.start, image)
+                    projection = Vector.between(this.start, image)
                         .project(this.direction);
                 [projection, image] = projection_images.set(
                     projection, image );
@@ -348,7 +348,7 @@ class Incutter {
             new_edges.insert_slice(start_proj, [new Edge(
                 start,
                 DirectedVector.from_collinear( this.direction,
-                    Graphs.Vector.from_points(start, end) ),
+                    Vector.between(start, end) ),
                 end,
             )], end_proj);
         }

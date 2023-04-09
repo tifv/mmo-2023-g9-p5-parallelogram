@@ -1,8 +1,8 @@
-namespace Flow {
+namespace FlowFinder {
 
 class ImpossibleFlowError extends Error {}
 
-type Flow = {a: number, b: number, c: number, sum: number};
+export type Flow = {a: number, b: number, c: number, sum: number};
 export type Flows = Map<Direction, Flow>;
 
 import Tokens = Algebra.Expression.Tokens;
@@ -116,7 +116,7 @@ export class UncutRegion {
     set point1(point: Point) {
         let old_point = this.point1;
         this.triangle1 = this.triangle1.shift(
-            Graphs.Vector.from_points(old_point, point) );
+            Vector.between(old_point, point) );
     }
 
     get point2(): Point {
@@ -126,7 +126,7 @@ export class UncutRegion {
     set point2(point: Point) {
         let old_point = this.point2;
         this.triangle2 = this.triangle2.shift(
-            Graphs.Vector.from_points(old_point, point) );
+            Vector.between(old_point, point) );
     }
 
     get_flow_constraints_base(): Array<Tokens> {
@@ -244,8 +244,8 @@ export class UncutRegion {
     }
 
     find_nearest_feasible(
-        point1_obj: {exact: false, close: Point} | {exact: true},
-        point2_obj: {exact: false, close: Point} | {exact: true},
+        point1_obj: {exact?: false, close: Point} | {exact: true},
+        point2_obj: {exact?: false, close: Point} | {exact: true},
     ): {point1: Point, point2: Point, flows: Flows} {
         let
             var_names = this.get_variable_names(),
@@ -312,6 +312,7 @@ export class UncutRegion {
 
 } // end namespace
 
-import UncutRegion = Flow.UncutRegion;
-import Flows = Flow.Flows;
+import UncutRegion = FlowFinder.UncutRegion;
+import Flows = FlowFinder.Flows;
+import Flow = FlowFinder.Flow;
 

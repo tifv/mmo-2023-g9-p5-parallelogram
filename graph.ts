@@ -40,7 +40,7 @@ export class Direction extends AbstractVector {
 }
 
 export class Vector extends AbstractVector {
-    static from_points(start: Point, end: Point) {
+    static between(start: Point, end: Point) {
         return new Vector(end.x - start.x, end.y - start.y);
     }
     get length() {
@@ -410,7 +410,7 @@ export class Polygon {
         let area = 0;
         let first_vertex = this.vertices[0];
         for (let {start, vector} of this.oriented_edges()) {
-            area += vector.skew(Vector.from_points(first_vertex, start));
+            area += vector.skew(Vector.between(first_vertex, start));
         }
         return area / 2;
     }
@@ -719,6 +719,7 @@ export class PlanarGraph implements GraphLike {
 
 }
 
+import Vector = Graphs.Vector;
 import Direction = Graphs.Direction;
 import DirectedVector = Graphs.DirectedVector;
 import Point = Graphs.Point;
