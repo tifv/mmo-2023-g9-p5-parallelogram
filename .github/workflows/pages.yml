@@ -6,18 +6,8 @@ on:
   page_build:
   workflow_dispatch:
 jobs:
-  install_ts:
-    name: Install TypeScript
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
-    steps:
-    - uses: actions/setup-node@v3
-    - run: npm install typescript
-  compile:
+  build:
     name: Compile TypeScript files
-    needs: [install_ts]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -25,22 +15,21 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v3
-    - run: mkdir ./build
+    - name: Install Node
+      uses: actions/setup-node@v3
+    - name: Install TypeScript
+      run:  npm install typescript
+    - name: Create build directory
+      run:  mkdir ./build && cp parallelogram.html ./build/index.html
     - name: Compile
-      run: tsc --project .
-    - run: cp parallelogram.html ./build/index.html
-  upload:
-    name: Upload build artifact
-    needs: [compile]
-    runs-on: ubuntu-latest
-    steps:
+      run:  tsc --project .
     - name: Upload
       uses: actions/upload-pages-artifact@v1
       with:
         path: ./build
   deploy:
     name: Deploy to GitHub Pages
-    needs: [upload]
+    needs: [build]
     permissions:
       pages: write
       id-token: write
