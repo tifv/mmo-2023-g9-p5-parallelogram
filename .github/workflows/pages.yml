@@ -17,4 +17,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: [install_typescript]
     steps:
+    - run: mkdir build
     - run: tsc
+  complete_project:
+    name: Complete site installation
+    runs-on: ubuntu-latest
+    needs: [compile_project]
+    steps:
+    - run: cp parallelogram.html build/index.html
