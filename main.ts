@@ -70,8 +70,6 @@ function main() {
             } else {
                 return;
             }
-            if (event instanceof MouseEvent)
-                event.preventDefault();
             let point = triangle === 1 ?
                 uncut_region.point1 : uncut_region.point2;
             drag.current = { triangle, start_offset:
@@ -80,8 +78,6 @@ function main() {
         move: (event: MouseEvent | TouchEvent) => {
             if (drag.current === null)
                 return;
-            if (event instanceof MouseEvent)
-                event.preventDefault();
             let point = drag.get_mouse_coords(event).shift(
                 drag.current.start_offset );
             if (drag.current.triangle === 1) {
@@ -102,24 +98,28 @@ function main() {
             drag.current = null;
         },
     };
+
     document.body.addEventListener('mousemove'  , drag.move );
-    document.body.addEventListener('touchmove'  , drag.move );
     document.body.addEventListener('mouseup'    , drag.end  );
     document.body.addEventListener('mouseleave' , drag.end  );
+
+    document.body.addEventListener('touchmove'  , drag.move );
     document.body.addEventListener('touchend'   , drag.end  );
     document.body.addEventListener('touchleave' , drag.end  );
     document.body.addEventListener('touchcancel', drag.end  );
-
 
     let reload = () => {
         let elements = Array.from(canvas.svg.children).filter(
             element => (['path', 'circle'].indexOf(element.tagName) >= 0) )
         for (let element of elements) {
+            if (element === triangle1 || element === triangle2)
+                continue;
             canvas.svg.removeChild(element);
         }
         let flows = uncut_region.find_flows();
         let cut_region = construct_cut_region(uncut_region, flows);
-        ({triangle1, triangle2} = canvas.draw_cut_region(cut_region));
+        ({triangle1, triangle2} = canvas.draw_cut_region( cut_region,
+            {triangle1, triangle2}));
         triangle1.addEventListener('mousedown' , drag.start);
         triangle1.addEventListener('touchstart', drag.start);
         triangle2.addEventListener('mousedown' , drag.start);
@@ -244,6 +244,7 @@ type FillDrawOptions = {
     classes?: string[],
     style?: {[name: string]: string},
     attributes?: {[name: string]: string},
+    existing_path?: SVGPathElement,
 };
 
 class Canvas {
@@ -278,17 +279,22 @@ class Canvas {
             first_vertex = false;
         }
         path_items.push("Z");
+        let d = path_items.join(" ");
+        if (options?.existing_path) {
+            options.existing_path.setAttribute('d', d);
+            return options.existing_path;
+        }
         return makesvg('path', {
             attributes: Object.assign({
-                d: path_items.join(" "),
+                d,
             }, options?.attributes),
             classes: options?.classes,
             style: options?.style,
             parent: this.svg,
         });
     }
-    mark_dot(point: Point, options: FillDrawOptions = {}) {
-        makesvg('circle', {
+    mark_dot(point: Point, options: FillDrawOptions = {}): SVGCircleElement {
+        return makesvg('circle', {
             attributes: {
                 cx: point.x, cy: -point.y,
                 r: 0.5,
@@ -309,7 +315,13 @@ class Canvas {
         do_border_face(region.triangle2, {classes:
             ["end_obj", "face", "border", "face__border"] });
     }
-    draw_cut_region(region: CutRegion) {
+    draw_cut_region( region: CutRegion, {
+        triangle1,
+        triangle2,
+    }: {
+        triangle1?: SVGPathElement | undefined,
+        triangle2?: SVGPathElement | undefined,
+    } = {}) {
         let mask = new Set<Edge|Polygon>();
         let do_border_face =
             (polygon: Polygon, options?: FillDrawOptions): SVGPathElement => {
@@ -320,15 +332,17 @@ class Canvas {
             };
         do_border_face(region.outer_face, {classes:
             ["face", "face__outer", "border", "face__border"] });
-        let triangle1 = do_border_face(region.triangle1, {
+        triangle1 = do_border_face(region.triangle1, {
             classes:
                 ["start_obj", "face", "border", "face__border"],
             attributes: {id: "triangle1"},
+            existing_path: triangle1,
         });
-        let triangle2 = do_border_face(region.triangle2, {
+        triangle2 = do_border_face(region.triangle2, {
             classes:
                 ["end_obj", "face", "border", "face__border"],
             attributes: {id: "triangle2"},
+            existing_path: triangle2,
         });
         for (let edge of region.graph.edges) {
             if (mask.has(edge))
@@ -447,6 +461,7 @@ function makehtml(tag: string, {
 
 function makesvg(tag: "svg", options?: MakeOptions): SVGSVGElement
 function makesvg(tag: "path", options?: MakeOptions): SVGPathElement
+function makesvg(tag: "circle", options?: MakeOptions): SVGCircleElement
 function makesvg(tag: string, options?: MakeOptions): SVGElement
 
 function makesvg(tag: string, options: MakeOptions = {}): SVGElement {

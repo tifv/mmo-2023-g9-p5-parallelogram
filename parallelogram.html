@@ -62,13 +62,17 @@
         --main-stroke-color: gray;
     }
     .start_obj {
-        --main-stroke-color: darkgreen;
         --main-fill-color: green;
     }
+        .start_obj:not(.face) {
+            --main-stroke-color: darkgreen;
+        }
     .end_obj {
-        --main-stroke-color: darkblue;
         --main-fill-color: blue;
     }
+        .end_obj:not(.face) {
+            --main-stroke-color: darkblue;
+        }
     .error_obj {
         --main-stroke-color: red;
         --main-fill-color: red;
