@@ -306,6 +306,23 @@ export class Polygon {
     reversed(): Polygon {
         return new Polygon(this.vertices[0], Array.from(this.edges).reverse());
     }
+    shift(vector: Vector): Polygon {
+        let vertex_map: (vertex: Point) => Point; {
+            let map = new Map<Point,Point>();
+            for (let vertex of this.vertices) {
+                map.set(vertex, vertex.shift(vector));
+            }
+            vertex_map = (vertex) => get_or_die(map, vertex);
+        }
+        let edge_map: (edge: Edge) => Edge; {
+            let map = new Map<Edge,Edge>();
+            for (let edge of this.edges) {
+                map.set(edge, edge.substitute(vertex_map));
+            }
+            edge_map = (edge) => get_or_die(map, edge);
+        }
+        return this.substitute(vertex_map, edge_map);
+    }
 
     substitute(
         vertex_map: (vertex: Point) => Point,

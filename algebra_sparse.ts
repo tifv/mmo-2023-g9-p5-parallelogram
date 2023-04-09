@@ -115,6 +115,32 @@ class NumberArray {
             start, end );
     }
 
+    every_nonzero(
+        callbackfn: (index: number, value: number) => boolean,
+        start?: number, end?: number,
+    ): boolean {
+        for (let result of this.map_items(
+            (index, value) => Math.abs(value) > EPSILON ?
+                callbackfn(index, value) : true,
+            start, end,
+        ))
+        {
+            if (!result)
+                return false;
+        }
+        return true;
+    }
+
+    some_nonzero(
+        callbackfn: (index: number, value: number) => boolean,
+        start?: number, end?: number,
+    ): boolean {
+        return !this.every_nonzero(
+            (index, value) => !callbackfn(index, value),
+            start, end,
+        );
+    }
+
     get_value(index: number, null_if_zero?: false): number
     get_value(index: number, null_if_zero: true): number | null
     get_value(index: number, null_if_zero: boolean = false): number | null {
@@ -140,7 +166,7 @@ class NumberArray {
                 return;
             }
             if (value !== null) {
-                values[j] += value;
+                values[j] = value;
             } else {
                 indices.splice(j, 1);
                 values.splice(j, 1);
@@ -290,13 +316,13 @@ export class CoVector extends NumberArray {
             end_offset?: number,
         } = {},
     ): number {
-        const width = this.width - 1, height = vector.height;
-        if (width != height + start_offset + end_offset)
+        const n = this.width - 1, height = vector.height;
+        if (n != height + start_offset + end_offset)
             throw new DimensionError();
         let indices = this.indices;
         let jndices = vector.indices;
-        let result = this.get_value(width) * const_factor;
-        if (indices.length == 0 || jndices.length == 0)
+        let result = this.get_value(n) * const_factor;
+        if (indices.length <= 1 || jndices.length <= 1)
             return result;
         let start_index = start_offset > 0 ? start_offset : 0;
         for ( let
@@ -306,7 +332,7 @@ export class CoVector extends NumberArray {
         {
             if (index < jndex + start_offset) {
                 ++i; index = indices[i];
-                if (index >= width)
+                if (index >= n)
                     break;
                 continue;
             }
@@ -319,7 +345,7 @@ export class CoVector extends NumberArray {
             result += this.values[i] * vector.values[j];
             ++i; index = indices[i];
             ++j; jndex = jndices[j];
-            if (index >= width || jndex >= height)
+            if (index >= n || jndex >= height)
                 break;
             // XXX debug
             if (!isFinite(result))
@@ -328,10 +354,23 @@ export class CoVector extends NumberArray {
         return result;
     }
 
-    relative_to(vector: Vector): CoVector {
-        const {width} = this;
+    /** @returns the change of constant element */
+    shift( vector: Vector,
+        apply_args?: Omit< NonNullable<Parameters<CoVector["apply"]>[1]>,
+            "const_factor" >,
+    ): number {
+        const n = this.width - 1;
+        let increase = this.apply( vector,
+            Object.assign({}, apply_args, {const_factor: <0>0}) );
+        this.add_value(n, increase);
+        return increase;
+    }
+
+    relative_to( vector: Vector,
+        apply_args?: Parameters<CoVector["shift"]>[1],
+    ): CoVector {
         let relative: CoVector = this.copy();
-        relative.add_value(width-1, this.apply(vector, {const_factor: 0}));
+        relative.shift(vector, apply_args);
         return relative;
     }
 
@@ -342,14 +381,14 @@ export class CoVector extends NumberArray {
             this.values = [];
             return;
         }
-        let {indices, values} = this;
+        let {values} = this;
         for (let i = 0; i < values.length; ++i) {
             values[i] *= ratio;
         }
     }
 
     /**
-     * @param eliminator 
+     * @param eliminator
      * @param symmetrical
      *   facilitates symmetrical elimination of quadratic matrix
      * @param eliminate_half
@@ -492,12 +531,12 @@ export class CoVector extends NumberArray {
         start?: number,
         end?: number,
         {
-            objective: direction = "abs",
-            objective_sign: value_sign = "any",
+            direction = "abs",
+            value_sign = "any",
             preserve_sign = false,
         }: {
-            objective?: "min" | "max" | "abs",
-            objective_sign?: 1 | -1 | "any",
+            direction?: "min" | "max" | "abs",
+            value_sign?: 1 | -1 | "any",
             preserve_sign?: boolean,
         } = {},
     ): {index: number, value: number} | null {
@@ -573,7 +612,7 @@ export class Matrix {
             this.rows.map(row => row.copy()) );
     }
 
-    copy_matrix(): Matrix {
+    copy(): Matrix {
         return this._copy_as(Matrix);
     }
 
@@ -683,13 +722,15 @@ export class Matrix {
 
 export class QuadraticMatrix extends Matrix {
 
-    copy_matrix(): QuadraticMatrix {
+    copy(): QuadraticMatrix {
         return this._copy_as(QuadraticMatrix);
     }
 
-    static from_dense(width: number, dense: Array<Array<number>>):
+    static from_dense(width: number | undefined, dense: Array<Array<number>>):
         QuadraticMatrix
     {
+        if (width === undefined)
+            width = dense.length;
         return this._from_dense_as(QuadraticMatrix, width, dense);
     }
 
@@ -712,20 +753,24 @@ export class QuadraticMatrix extends Matrix {
         }
     }
 
+    shift( vector: Vector,
+        apply_args?: Parameters<CoVector["shift"]>[1],
+    ): void {
+        const n = this.width - 1;
+        let shifts = new Array<[number,number]>();
+        for (let [index, row] of this.rows.entries()) {
+            let shift = row.shift(vector, apply_args);
+            if (Math.abs(shift) > EPSILON)
+                shifts.push([index, shift]);
+        }
+        let last_row = this.rows[n];
+        last_row.add_items(shifts);
+        last_row.shift(vector, apply_args);
+    }
+
     relative_to(vector: Vector): QuadraticMatrix {
-        const {width, height} = this;
-        let last_column_items = new Array<[number,number]>();
-        let relative = new QuadraticMatrix( this.width,
-            this.rows.map((row, index) => {
-                let relative_row = row.relative_to(vector);
-                let last_value = relative_row.get_value(width-1, true);
-                if (last_value !== null)
-                    last_column_items.push([index, last_value]);
-                return relative_row;
-            }) );
-        relative.rows[height-1] =
-            CoVector.from_items(width-1, last_column_items)
-                .relative_to(vector);
+        let relative = this.copy();
+        relative.shift(vector);
         return relative;
     }
 
@@ -734,12 +779,34 @@ export class QuadraticMatrix extends Matrix {
             row: CoVector,
             index: number,
             value: number,
+            is_within?: boolean,
         },
     ): void {
-        let {
-            row: {indices: elim_indices, values: elim_values},
-            index: elim_index,
-        } = eliminator;
+        const elim_index = eliminator.index;
+        if (eliminator.is_within) {
+            if (this.rows[eliminator.index] !== eliminator.row)
+                throw new Error(
+                    "Elimination from within the quadratic matrix " +
+                    "can only be done by diagonal element" );
+            for (let [index, row] of this.rows.entries()) {
+                if (index === elim_index)
+                    continue;
+                row.eliminate_with(eliminator, {
+                    symmetrical: (jndex, increase) => {
+                        switch (jndex) {
+                            case elim_index:
+                                eliminator.row.set_value(index, null);
+                                break;
+                            case index:
+                                return;
+                            default:
+                                this.add_value(jndex, index, increase);
+                        }
+                    },
+                });
+            }
+            return;
+        }
         this.rows[elim_index].eliminate_with(eliminator, {
             symmetrical: (jndex, increase) => {
                 if (jndex === elim_index)
@@ -755,9 +822,67 @@ export class QuadraticMatrix extends Matrix {
                     if (jndex === elim_index)
                         return;
                     this.add_value(jndex, index, increase);
-                }
+                },
             });
         }
+    }
+
+    get_definiteness(): {
+        positive: number, negative: number, zero: number,
+        is_positive: boolean, is_semipositive: boolean,
+    } {
+        return this.copy()._reduce_and_get_definiteness();
+    }
+
+    _reduce_and_get_definiteness(): {
+        positive: number, negative: number, zero: number,
+        is_positive: boolean, is_semipositive: boolean,
+    } {
+        const n = this.width - 1;
+        let definiteness = {
+            positive: 0,
+            negative: 0,
+            zero: 0,
+        }
+        for (let index = 0; index < n; ++index) {
+            let row = this.rows[index];
+            let value = row.get_value(index);
+            if (Math.abs(value) < EPSILON) {
+                let leader_search = row.find_extreme(0, n, {
+                    direction: "abs", value_sign: "any",
+                });
+                if (leader_search === null) {
+                    definiteness.zero += 1;
+                    continue;
+                }
+                if (leader_search.index === index) {
+                    throw new Error("unreachable");
+                }
+                let leader_index = leader_search.index;
+                let leader_value = leader_search.value;
+                let items = [...(this.rows[leader_index]
+                    .map_items<[number,number]>( (i, v) =>
+                        [i, i === index ? 1/2 : v / leader_value / 2]
+                    ) )];
+                row.add_items(items);
+                for (let [i, value] of items) {
+                    this.rows[i].add_value(index, value);
+                }
+                row.set_value(index, value = 1);
+            }
+            this.eliminate_with({row, index, value, is_within: true});
+            if (value > 0) {
+                definiteness.positive += 1;
+            } else {
+                definiteness.negative += 1;
+            }
+        }
+        return Object.assign(definiteness, {
+            is_semipositive:
+                definiteness.negative === 0,
+            is_positive:
+                definiteness.negative === 0 && definiteness.zero === 0,
+        });
     }
 
 }
@@ -784,7 +909,7 @@ export class GaussianReductor {
         let eliminated_count = 0;
         for (let [index, row] of matrix.rows.entries()) {
             let leading_search = row.scale_extreme(0, width,
-                {objective: "abs", objective_sign: "any"} );
+                {direction: "abs", value_sign: "any"} );
             let leading_index: number | null = row_leaders[index] =
                 (leading_search === null) ? null : leading_search.index;
             if (leading_index === null) {

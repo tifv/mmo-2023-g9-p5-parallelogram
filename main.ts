@@ -37,7 +37,6 @@ function main() {
     };
     set_canvas_viewBox();
     let uncut_region = build_uncut_region();
-    let flow_directions = select_flowing_sector(uncut_region);
 
     let reload = () => {
         let elements = Array.from(canvas.svg.children).filter(
@@ -45,7 +44,7 @@ function main() {
         for (let element of elements) {
             canvas.svg.removeChild(element);
         }
-        let flows = find_flows(uncut_region, flow_directions);
+        let flows = uncut_region.find_flows();
         let cut_region = construct_cut_region(uncut_region, flows);
         canvas.draw_cut_region(cut_region);
     }
@@ -159,8 +158,7 @@ function main_debug() {
 
 function main_debug_try(canvas: Canvas) {
     let uncut_region = build_uncut_region();
-    let flow_directions = select_flowing_sector(uncut_region);
-    let flows = find_flows(uncut_region, flow_directions);
+    let flows = uncut_region.find_flows();
     let cut_region = construct_cut_region(uncut_region, flows);
     canvas.draw_cut_region(cut_region);
 }

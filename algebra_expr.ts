@@ -692,7 +692,7 @@ export class QuadraticFunction extends AffineFunction{
         let sublinear = super.scale(scale);
         return new QuadraticFunction(
             Object.fromEntries(Object.entries(this.quadratic).map(
-                (name1, values) => [ name1,
+                ([name1, values]) => [ name1,
                     Object.fromEntries(Object.entries(values).map(
                         ([name2, value]) => [name2, scale * value] )),
                 ] )),

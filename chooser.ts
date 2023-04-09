@@ -34,7 +34,7 @@ class RandomChooser extends TrivialChooser {
             + numbers.min() );
     }
     static choose_weight(): number {
-        return Math.random();
+        return 2 * Math.random() - 1;
     }
     static choose_index(length: number) {
         let index = Math.floor(length * Math.random());
