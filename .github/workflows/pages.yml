@@ -20,11 +20,13 @@ jobs:
     - name: Install TypeScript
       run:  npm install typescript
     - name: Create build directory
-      run:  mkdir ./build && cp page.html ./build/index.html
+      run: |
+        mkdir ./build
+        cp page.html ./build/index.html
     - name: Compile
       run: |
-        tsc --project ./tsconfig.json
-        --sourceRoot null --sourceMap false
+        tsc --project ./tsconfig.json \
+          --sourceRoot null --sourceMap false
     - name: Upload
       uses: actions/upload-pages-artifact@v1
       with:
