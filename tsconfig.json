@@ -7,11 +7,11 @@
     "outDir": "build",
     "outFile": "build/parallelogram.js",
     "noImplicitAny": true,
-    "removeComments": false,
     "noImplicitThis": true,
+    "removeComments": true,
     "declaration": false,
-    "sourceMap": true,
     "sourceRoot": "/src/",
+    "sourceMap": true,
   },
   "files": [
     "common.ts",

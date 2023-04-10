@@ -90,6 +90,22 @@ export class Point extends Pair {
             Math.abs(this.y - point.y) < EPSILON );
     }
 
+    static bbox(...points: Array<Point>): [Point, Point] {
+        let
+            min_x = +Infinity, max_x = -Infinity,
+            min_y = +Infinity, max_y = -Infinity,
+            n = points.length;
+        if (n < 1)
+            throw new Error("Cannot take bbox of an empty set");
+        for (let {x, y} of points) {
+            if (x < min_x - EPSILON) min_x = x;
+            if (x > max_x + EPSILON) max_x = x;
+            if (y < min_y - EPSILON) min_y = y;
+            if (y > max_y + EPSILON) max_y = y;
+        }
+        return [new Point(min_x, min_y), new Point(max_x, max_y)];
+    }
+
     static center(...points: Array<Point>): Point {
         let x = 0, y = 0, n = points.length;
         if (n < 1)

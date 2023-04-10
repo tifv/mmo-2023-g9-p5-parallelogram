@@ -1,4 +1,4 @@
-namespace FlowFinder {
+namespace UncutFlow {
 
 class ImpossibleFlowError extends Error {}
 
@@ -46,6 +46,10 @@ export class UncutRegion {
             sector_end  : this.sector_end,
             flow_vectors: this.flow_vectors,
         } = this._find_flow_sector());
+    }
+
+    bbox(): [Point, Point] {
+        return Point.bbox(...this.polygon.vertices);
     }
 
     _find_flow_sector() {
@@ -313,7 +317,7 @@ export class UncutRegion {
 
 } // end namespace
 
-import UncutRegion = FlowFinder.UncutRegion;
-import Flows = FlowFinder.Flows;
-import Flow = FlowFinder.Flow;
+import UncutRegion = UncutFlow.UncutRegion;
+import Flows = UncutFlow.Flows;
+import Flow = UncutFlow.Flow;
 

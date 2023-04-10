@@ -22,7 +22,9 @@ jobs:
     - name: Create build directory
       run:  mkdir ./build && cp page.html ./build/index.html
     - name: Compile
-      run:  tsc --project .
+      run: |
+        tsc --project ./tsconfig.json
+        --sourceRoot null --sourceMap false
     - name: Upload
       uses: actions/upload-pages-artifact@v1
       with:
