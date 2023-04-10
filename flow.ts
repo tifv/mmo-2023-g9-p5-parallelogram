@@ -214,9 +214,10 @@ export class UncutRegion {
         for (let [i, vector] of this.flow_vectors.entries()) {
             let value = vector.value;
             let names = var_names.flows(i);
+            let ch = chooser.offspring();
             map_flows(a => {
                 objective.push(
-                    "+", chooser.choose_weight(), "*", names[a], "/", value );
+                    "+", ch.choose_weight(), "*", names[a], "/", value );
             });
         }
 

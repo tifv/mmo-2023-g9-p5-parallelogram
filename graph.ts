@@ -89,6 +89,17 @@ export class Point extends Pair {
         return ( Math.abs(this.x - point.x) < EPSILON &&
             Math.abs(this.y - point.y) < EPSILON );
     }
+
+    static center(...points: Array<Point>): Point {
+        let x = 0, y = 0, n = points.length;
+        if (n < 1)
+            throw new Error("Cannot take average of an empty set");
+        for (let point of points) {
+            x += point.x;
+            y += point.y;
+        }
+        return new Point(x / n, y / n);
+    }
 }
 
 export class Edge {

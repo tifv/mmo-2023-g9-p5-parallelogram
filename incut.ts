@@ -64,7 +64,7 @@ function construct_cut_region(
             Incutter.incut(
                 region, sector_start, sector_end,
                 direction, flow,
-                chooser,
+                chooser.offspring(),
             ));
         // region.graph.check();
     }
@@ -240,11 +240,12 @@ class Incutter {
             if (floating_faces.length == 0)
                 break;
             let
-                floating_face = chooser.choose_face(floating_faces),
+                ch = chooser.offspring(),
+                floating_face = ch.choose_face(floating_faces),
                 height = heighted_graph.get_face_height(floating_face);
             // XXX set any possible intermediate heights, not just min and max
             heighted_graph.set_face_height( floating_face,
-                chooser.choose_element([height.min, height.max]) );
+                ch.choose_element([height.min, height.max]) );
         }
         /**
          * XXX TODO add any underused intermediate heights to vertices

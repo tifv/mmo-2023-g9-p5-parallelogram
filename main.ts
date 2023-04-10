@@ -111,8 +111,9 @@ function main() {
     document.body.addEventListener('touchleave' , drag.end  );
     document.body.addEventListener('touchcancel', drag.end  );
 
+    let chooser = Choosers.CoprimeChooser.default()
     let reload = () => {
-        let chooser = new Chooser();
+        chooser.reset();
         let elements = Array.from(canvas.svg.children).filter(
             element => (['path', 'circle'].indexOf(element.tagName) >= 0) )
         for (let element of elements) {
@@ -123,9 +124,9 @@ function main() {
                 continue;
             canvas.svg.removeChild(element);
         }
-        let flows = uncut_region.find_flows(chooser);
+        let flows = uncut_region.find_flows(chooser.offspring());
         let cut_region = construct_cut_region( uncut_region, flows,
-            chooser );
+            chooser.offspring() );
         ( {outer_face, triangle1, triangle2} =
             canvas.draw_cut_region( cut_region,
                 {outer_face, triangle1, triangle2} )
@@ -244,11 +245,11 @@ function main_debug() {
 };
 
 function main_debug_try(canvas: Canvas) {
-    let chooser = new Chooser();
+    let chooser = Choosers.CoprimeChooser.default();
     let uncut_region = build_uncut_region();
-    let flows = uncut_region.find_flows(chooser);
+    let flows = uncut_region.find_flows(chooser.offspring());
     let cut_region = construct_cut_region( uncut_region, flows,
-        chooser );
+        chooser.offspring() );
     canvas.draw_cut_region(cut_region);
 }
 
