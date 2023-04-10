@@ -218,12 +218,6 @@ export class LPProblemSolver {
         let feasible_point = Vector.zero(n);
         feasible_point.add_from( feasibility_solution,
             {start: 1, map: (index) => index - 1} );
-        // XXX debug
-        for (let constraint of constraints.rows) {
-            if (constraint.apply(feasible_point) < -EPSILON) {
-                throw new Error("Feasible point is not actually feasible");
-            }
-        }
         return feasible_point;
     }
 
@@ -328,7 +322,6 @@ export class LPProblemSolver {
         }
         let entering_index = entering.index;
         let entering_row = this.tableau.constraint.rows[entering_index];
-        // XXX debug
         if (entering_row.some_nonzero(() => true, k + n)) {
             throw new Error("unreachable");
         }
@@ -672,7 +665,6 @@ export class QPProblemSolver {
 
         if (entering === null) {
             let linear_row = this.tableau.objective.rows[k + n];
-            // XXX debug
             if (linear_row.some_nonzero(() => true, k, k + n)) {
                 throw new Error("unreachable");
             }
@@ -685,7 +677,6 @@ export class QPProblemSolver {
         }
         let entering_index = entering.index;
         let entering_row = this.tableau.constraint.rows[entering_index];
-        // XXX debug
         if (entering_row.some_nonzero(() => true, k + n)) {
             throw new Error("unreachable");
         }

@@ -254,6 +254,8 @@ export class Polygon {
         sides: ParallelogramInfo["sides"]
     } | null | undefined = undefined;
 
+    // id: any = crypto.randomUUID().substring(0, 8);
+
     constructor(start: Point, edges: Array<Edge>) {
         this.edges = edges;
         this.size = edges.length;
@@ -1109,23 +1111,6 @@ export class PlanarGraph implements GraphLike {
             [a1, b1, c1, d1] = gram1.parallelogram.sides,
             [a2, b2, c2, d2] = gram2.parallelogram.sides;
         let edges: Array<Edge>;
-        { // XXX debug
-            let [dir1, dir2] = other_direction.skew(direction) > 0
-                ? [direction, other_direction]
-                : [other_direction, direction];
-            if (
-                a1.direction !==  dir1 || a1.forward !== true  ||
-                b1.direction !== dir2 || b1.forward !== true  ||
-                c1.direction !==  dir1 || c1.forward !== false ||
-                d1.direction !== dir2 || d1.forward !== false ||
-                a2.direction !==  dir1 || a2.forward !== true  ||
-                b2.direction !== dir2 || b2.forward !== true  ||
-                c2.direction !==  dir1 || c2.forward !== false ||
-                d2.direction !== dir2 || d2.forward !== false
-            ) {
-                throw new Error("unreachable");
-            }
-        }
         if (other_direction.skew(direction) > 0) {
             if (
                 a1.edges.length > 1 || a1.edges[0] !== edge ||

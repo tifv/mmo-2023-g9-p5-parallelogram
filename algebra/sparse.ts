@@ -347,10 +347,9 @@ export class CoVector extends NumberArray {
             ++j; jndex = jndices[j];
             if (index >= n || jndex >= height)
                 break;
-            // XXX debug
-            if (!isFinite(result))
-                throw new Error("unreachable");
         }
+        if (!isFinite(result))
+            throw new Error("unreachable");
         return result;
     }
 
