@@ -215,7 +215,6 @@ class Incutter {
         }
         let heights = NumberSet.from_numbers(
             [start_height, height1, height2, end_height] );
-        // XXX TODO add more intermediate heights
         return {start_height, end_height, height1, height2, heights};
     }
     build_heighted_graph(max_height: number): HeightedFaceGraph {
@@ -250,16 +249,9 @@ class Incutter {
                 ch = chooser.offspring(),
                 floating_face = ch.choose_face(floating_faces),
                 height = heighted_graph.get_face_height(floating_face);
-            // XXX set any possible intermediate heights, not just min and max
             heighted_graph.set_face_height( floating_face,
                 ch.choose_element([height.min, height.max]) );
         }
-        /**
-         * XXX TODO add any underused intermediate heights to vertices
-         * and connect them to other objects that use them.
-         * (Track usage of each height in operations above.
-         * Or the number of occurences.)
-         */
     }
     determine_edge_heights(heighted_graph: HeightedFaceGraph) {
         for (let edge of heighted_graph.edges) {
