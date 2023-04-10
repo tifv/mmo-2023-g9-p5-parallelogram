@@ -61,7 +61,9 @@ function construct_cut_region(uncut_region: UncutRegion, flows: Flows) {
                 region, sector_start, sector_end,
                 direction, flow,
             ));
+        // region.graph.check();
     }
+    region.graph.reduce_parallelograms();
     return region;
 }
 
@@ -81,7 +83,6 @@ class Incutter {
     lower_border_edges: Array<Edge>;
 
     max_height: number;
-    // heighted_graph: HeightedFaceGraph;
     edge_height_map: Map<Edge, NumberSet> = new Map();
     vertex_height_map: Map<Point, NumberSet> = new Map();
 
@@ -111,7 +112,6 @@ class Incutter {
         heighted_graph.set_face_height(region.triangle1, height1);
         heighted_graph.set_face_height(region.triangle2, height2);
         incutter.determine_face_heights(heighted_graph, heights);
-        heighted_graph.check();
         incutter.determine_edge_heights(heighted_graph);
         incutter.determine_vertex_heights();
 

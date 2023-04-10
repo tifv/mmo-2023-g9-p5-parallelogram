@@ -96,6 +96,8 @@ export class Edge {
     delta: DirectedVector;
     end: Point;
 
+    // id: any = crypto.randomUUID().substring(0, 8);
+
     constructor(start: Point, delta: DirectedVector, end: Point) {
         if (delta.value < 0)
             [start, delta, end] = [end, delta.opposite(), start];
@@ -215,6 +217,9 @@ export class Polygon {
     edges: Array<Edge>;
     size: number;
     vertices: Array<Point>;
+    parallelogram: {
+        sides: ParallelogramInfo["sides"]
+    } | null | undefined = undefined;
 
     constructor(start: Point, edges: Array<Edge>) {
         this.edges = edges;
@@ -467,7 +472,122 @@ export class Polygon {
         };
     }
 
+    as_parallelogram(): Parallelogram | null {
+        try_cache: {
+            let polygon: (
+                Polygon & {parallelogram: ParallelogramInfo} |
+                Polygon & {parallelogram: null} |
+                Polygon & {parallelogram: undefined}
+            ) = this;
+            if (polygon.parallelogram === undefined)
+                break try_cache;
+            if (polygon.parallelogram === null)
+                return null;
+            return polygon;
+        }
+        let directions = new Array<Direction>();
+        type Run = {
+            direction: Direction,
+            forward: boolean,
+            edges: Edge[],
+        };
+        let runs = new Array<Run>();
+        for (let {edge, forward} of this.oriented_edges()) {
+            let direction = edge.direction;
+            if (!directions.includes(direction)) {
+                if (directions.length >= 2) {
+                    this.parallelogram = null;
+                    return null;
+                }
+                directions.push(direction);
+                directions.sort((a, b) => a.skew(b));
+            }
+            let run: Run | null = null;
+            get_last_run: {
+                if (runs.length === 0)
+                    break get_last_run;
+                let last_run = runs[runs.length-1];
+                if (
+                    last_run.direction !== direction ||
+                    last_run.forward !== forward
+                )
+                    break get_last_run;
+                run = last_run;
+            }
+            if (run === null) {
+                run = {direction, forward, edges: []};
+                runs.push(run);
+            }
+            run.edges.push(edge);
+        }
+        if (runs.length > 5 || runs.length < 4) {
+            this.parallelogram = null;
+            return null;
+        }
+        if (runs.length == 5) {
+            if (
+                runs[4].direction !== runs[0].direction ||
+                runs[4].forward   !== runs[0].forward
+            ) {
+                throw new Error("unreachable");
+            }
+            runs[0].edges.unshift(...runs[4].edges);
+            runs.pop();
+        }
+        let [index = null] = runs
+            .map( (run, index) =>
+                (run.direction === directions[0] && run.forward === true) ?
+                    index : null )
+            .filter(value => value !== null);
+        if (index === null) {
+            throw new Error("unreachable");
+        }
+        runs.splice(4 - index, 0, ...runs.splice(0, index));
+        let [a, b, c, d] = runs;
+        if (
+            a.direction !== directions[0] || a.forward !== true  ||
+            b.direction !== directions[1] || b.forward !== true  ||
+            c.direction !== directions[0] || c.forward !== false ||
+            d.direction !== directions[1] || d.forward !== false
+        ) {
+            // maybe the outer face, but not a true parallelogram;
+            this.parallelogram = null;
+            return null;
+        }
+        let info: ParallelogramInfo = { sides:
+            <[Run,Run,Run,Run]>[a, b, c, d] };
+        let polygon = Object.assign(this, {parallelogram: info});
+        return polygon;
+    }
+
+    other_direction(this: Parallelogram, direction: Direction): Direction {
+        for (let side of this.parallelogram.sides) {
+            if (side.direction === direction)
+                continue;
+            return side.direction;
+        }
+        throw new Error("unreachable");
+    }
 }
+
+type ParallelogramSide =
+    {direction: Direction, forward: boolean, edges: Edge[]}
+type ParallelogramInfo = {
+    /** There is very specific order to the sides:
+     *  - primary direction is the one to the right of two directions
+     *  - 1st side is the forward primary direction;
+     *  - 2nd side is the forward other direction;
+     *  - 3rd side is the backward primary direction;
+     *  - 4th side is the backward other direction.
+     */
+    sides: [
+        ParallelogramSide,
+        ParallelogramSide,
+        ParallelogramSide,
+        ParallelogramSide,
+    ],
+}
+type Parallelogram = Polygon & {parallelogram: ParallelogramInfo};
 
 export type GraphLike = {
     vertices: Iterable<Point>,
@@ -536,11 +656,8 @@ export class PlanarGraph implements GraphLike {
                 }
                 let index = forward ? 0 : 1;
                 if (faceset[index] !== null) {
-                    let error: any = new Error(
+                    throw new Error(
                         "Face with the same direction is already present" );
-                    error.info = {build_facemap:
-                        {edge, face, faceset} };
-                    throw error;
                 }
                 faceset[index] = face;
             }
@@ -550,10 +667,8 @@ export class PlanarGraph implements GraphLike {
     edge_faces(edge: Edge): FaceSet {
         let faceset = this.facemap.get(edge);
         if (faceset === undefined) {
-            let error: any = new Error(
+            throw new Error(
                 "The edge does not have an incident face" );
-            error.info = {edge_faces: {edge, graph: this}}
-            throw error;
         }
         return faceset;
     }
@@ -608,6 +723,7 @@ export class PlanarGraph implements GraphLike {
         edges_with_one_face = true,
         faces_with_rogue_edges = true,
         face_orientation = true,
+        parallelograms = true,
         return_errors = false,
     }: {[name: string]: boolean} = {}): {errors: any[], info: any[]} | void {
         let errors: any[] = [], info: any[] = [{graph: this}];
@@ -686,7 +802,6 @@ export class PlanarGraph implements GraphLike {
             }
         }
 
-        face_orientation:
         if (face_orientation) {
             let reverse_faces = new Array<Polygon>();
             for (let face of this.faces) {
@@ -694,16 +809,33 @@ export class PlanarGraph implements GraphLike {
                     reverse_faces.push(face);
                 }
             }
-            if (reverse_faces.length == 0) {
+            switch (reverse_faces.length) {
+            case 0:
                 errors.push({face_orientation: {reverse: []}});
-                break face_orientation;
-            }
-            if (reverse_faces.length == 1) {
+                break;
+            case 1:
                 let [outer_face] = reverse_faces;
-                info.push({outer_face})
-                break face_orientation;
+                info.push({outer_face});
+                break;
+            default:
+                errors.push({face_orientation: {reverse: reverse_faces}});
+                break;
             }
-            errors.push({face_orientation: {reverse: reverse_faces}});
+        }
+
+        if (parallelograms) {
+            let non_gram_faces = new Array<Polygon>();
+            for (let face of this.faces) {
+                let gram = face.as_parallelogram();
+                if (gram === null) {
+                    non_gram_faces.push(face)
+                }
+            }
+            if (non_gram_faces.length <= 3) {
+                info.push({parallelograms: {not: non_gram_faces}});
+            } else {
+                errors.push({parallelograms: {not: non_gram_faces}});
+            }
         }
 
         if (return_errors)
@@ -713,6 +845,284 @@ export class PlanarGraph implements GraphLike {
             error.info = { Graph_check:
                 Object.assign({}, ...info, ...errors) };
             throw error;
+        }
+    }
+
+    _remove_face(face: Polygon): void {
+        let deleted: boolean = this.faces.delete(face);
+        if (!deleted)
+            throw new Error("The face did not belong to the graph");
+        let dangling_edges = new Array<Edge>();
+        for (let {edge, forward} of face.oriented_edges()) {
+            let faceset = this.edge_faces(edge);
+            let index = forward ? 0 : 1;
+            if (faceset[index] !== face)
+                throw new Error( "The incidence of face with the edge " +
+                    "was not registered" );
+            faceset[index] = null;
+            if (faceset[0] === null && faceset[1] === null)
+                dangling_edges.push(edge);
+        }
+        for (let edge of dangling_edges) {
+            this._remove_edge(edge);
+        }
+    }
+    _remove_edge(edge: Edge): void {
+        let faceset = this.facemap.get(edge);
+        if (faceset === undefined) {
+            throw new Error("The edge incidences were not registered");
+        }
+        if (faceset[0] !== null || faceset[1] !== null) {
+            throw new Error("The edge incidences were not removed");
+        }
+        this.facemap.delete(edge);
+        let deleted = this.edges.delete(edge);
+        if (!deleted)
+            throw new Error("The edge did not belong to the graph");
+        let dangling_vertices = new Array<Point>();
+        for (let vertex of edge) {
+            let edgeset = this.vertex_edges(vertex);
+            let index = edgeset.indexOf(edge);
+            if (index < 0)
+                throw new Error( "The incidence of edge with the vertex " +
+                    "was not registered" );
+            edgeset.splice(index, 1);
+            if (edgeset.length === 0)
+                dangling_vertices.push(vertex);
+        }
+        for (let vertex of dangling_vertices) {
+            this._remove_vertex(vertex);
+        }
+    }
+    _remove_vertex(vertex: Point): void {
+        let edgeset = this.edgemap.get(vertex);
+        if (edgeset === undefined) {
+            throw new Error("The vertex incidences were not registered");
+        }
+        if (edgeset.length > 0) {
+            throw new Error("The vertex incidences were not removed");
+        }
+        this.edgemap.delete(vertex);
+        let deleted = this.vertices.delete(vertex);
+        if (!deleted)
+            throw new Error("The vertex did not belong to the graph");
+    }
+    _add_face(face: Polygon): void {
+        if (this.faces.has(face))
+            throw new Error("The face already belongs to the graph");
+        this.faces.add(face);
+        for (let {edge, forward} of face.oriented_edges()) {
+            if (!this.edges.has(edge))
+                this._add_edge(edge);
+            let faceset = get_or_die(this.facemap, edge);
+            let index = forward ? 0 : 1;
+            if (faceset[index] !== null) {
+                throw new Error(
+                    "Face with the same direction is already present" );
+            }
+            faceset[index] = face;
+        }
+    }
+    _add_edge(edge: Edge): void {
+        if (this.edges.has(edge))
+            throw new Error("The edge already belongs to the graph");
+        this.edges.add(edge);
+        for (let vertex of edge) {
+            if (!this.vertices.has(vertex))
+                this._add_vertex(vertex);
+            let edgeset = get_or_die(this.edgemap, vertex);
+            if (edgeset.includes(edge)) {
+                throw new Error("unreachable");
+            }
+            edgeset.push(edge);
+        }
+        this.facemap.set(edge, [null, null]);
+    }
+    _add_vertex(vertex: Point): void {
+        if (this.vertices.has(vertex))
+            throw new Error("The vertex already belongs to the graph");
+        this.vertices.add(vertex);
+        this.edgemap.set(vertex, []);
+    }
+    _join_edges(vertex: Point): Edge {
+        let edgeset = this.vertex_edges(vertex);
+        if (edgeset.length !== 2) {
+            throw new Error("Can only join two adjacent edges");
+        }
+        let [edge1, edge2] = edgeset;
+        let direction = edge1.direction;
+        if (
+            direction !== edge2.direction ||
+            epsilon_sign(edge1.delta.value) !==
+                epsilon_sign(edge2.delta.value)
+        ) {
+            throw new Error("Can only join two co-directed edges");
+        }
+        if (edge1.start === vertex) {
+            [edge1, edge2] = [edge2, edge1];
+        }
+        if (edge1.end !== vertex || edge2.start !== vertex) {
+            throw new Error("unreachable");
+        }
+        let start = edge1.start, end = edge2.end;
+        let
+            faceset1 = this.edge_faces(edge1),
+            faceset2 = this.edge_faces(edge2);
+        if (faceset1[0] !== faceset2[0] || faceset1[1] !== faceset2[1]) {
+            throw new Error("unreachable");
+        }
+        let new_edge = new Edge(
+            start,
+            new DirectedVector( direction,
+                edge1.delta.value + edge2.delta.value ),
+            end,
+        );
+        let new_faces = new Array<Polygon>();
+        let [face1, face2] = faceset1;
+        if (face1 === null && face2 === null)
+            throw new Error("unreachable");
+        if (face1 !== null) {
+            let index1 = face1.edges.indexOf(edge1);
+            if (index1 < 0)
+                throw new Error("unreachable");
+            if (face1.get_edge(index1+1) !== edge2)
+                throw new Error("unreachable");
+            new_faces.push(new Polygon(
+                start,
+                [new_edge, ...face1.slice_edges(index1+2, index1)],
+            ));
+            this._remove_face(face1);
+        }
+        if (face2 !== null) {
+            let index2 = face2.edges.indexOf(edge2);
+            if (index2 < 0)
+                throw new Error("unreachable");
+            if (face2.get_edge(index2+1) !== edge1)
+                throw new Error("unreachable");
+            new_faces.push(new Polygon(
+                end,
+                [new_edge, ...face2.slice_edges(index2+2, index2)],
+            ));
+            this._remove_face(face2);
+        }
+        if (this.edges.has(edge1) || this.edges.has(edge2))
+            throw new Error("unreachable");
+        for (let face of new_faces) {
+            this._add_face(face);
+        }
+        return new_edge;
+    }
+    _join_parallelograms(edge: Edge): Polygon {
+        let [face1, face2] = this.edge_faces(edge);
+        if (face1 === null || face2 === null)
+            throw new Error("Can only join two adjacent faces");
+        let
+            gram1 = face1.as_parallelogram(),
+            gram2 = face2.as_parallelogram();
+        if (gram1 === null || gram2 === null)
+            throw new Error("Can only join two adjacent parallelograms");
+        let direction = edge.direction;
+        let start = edge.start;
+        let other_direction = gram1.other_direction(direction);
+        if (gram2.other_direction(direction) !== other_direction) {
+            throw new Error( "Can only join two parallelograms " +
+                "with parallel respective edges" );
+        }
+        let
+            [a1, b1, c1, d1] = gram1.parallelogram.sides,
+            [a2, b2, c2, d2] = gram2.parallelogram.sides;
+        let edges: Array<Edge>;
+        { // XXX debug
+            let [dir1, dir2] = other_direction.skew(direction) > 0
+                ? [direction, other_direction]
+                : [other_direction, direction];
+            if (
+                a1.direction !==  dir1 || a1.forward !== true  ||
+                b1.direction !== dir2 || b1.forward !== true  ||
+                c1.direction !==  dir1 || c1.forward !== false ||
+                d1.direction !== dir2 || d1.forward !== false ||
+                a2.direction !==  dir1 || a2.forward !== true  ||
+                b2.direction !== dir2 || b2.forward !== true  ||
+                c2.direction !==  dir1 || c2.forward !== false ||
+                d2.direction !== dir2 || d2.forward !== false
+            ) {
+                throw new Error("unreachable");
+            }
+        }
+        if (other_direction.skew(direction) > 0) {
+            if (
+                a1.edges.length > 1 || a1.edges[0] !== edge ||
+                c2.edges.length > 1 || c2.edges[0] !== edge
+            )
+                throw new Error( "Can only join parallelograms " +
+                    "with single common edge" );
+            edges = [
+                ...d2.edges, ...a2.edges, ...b2.edges,
+                ...b1.edges, ...c1.edges, ...d1.edges,
+            ];
+        } else {
+            if (
+                b1.edges.length > 1 || b1.edges[0] !== edge ||
+                d2.edges.length > 1 || d2.edges[0] !== edge
+            )
+                throw new Error( "Can only join parallelograms " +
+                    "with single common edge" );
+            edges = [
+                ...a2.edges, ...b2.edges, ...c2.edges,
+                ...c1.edges, ...d1.edges, ...a1.edges,
+            ];
+        }
+        let new_face = new Polygon(start, edges);
+        this._remove_face(face1);
+        this._remove_face(face2);
+        this._add_face(new_face);
+        return new_face;
+    }
+    reduce_parallelograms(): void {
+        let iffy_vertices = new Set<Point>(this.vertices);
+        let iffy_edges = new Set<Edge>(this.edges);
+        while (iffy_vertices.size > 0 || iffy_edges.size > 0) {
+            for (let vertex of iffy_vertices) {
+                let edgeset = this.vertex_edges(vertex);
+                if (edgeset.length !== 2)
+                    continue;
+                let [edge1, edge2] = edgeset;
+                if (edge1.direction !== edge2.direction)
+                    continue;
+                let new_edge = this._join_edges(vertex);
+                iffy_edges.delete(edge1);
+                iffy_edges.delete(edge2);
+                iffy_edges.add(new_edge);
+            }
+            iffy_vertices.clear();
+            for (let edge of iffy_edges) {
+                let [face1, face2] = this.edge_faces(edge);
+                if (face1 === null || face2 === null)
+                    continue;
+                let
+                    gram1 = face1.as_parallelogram(),
+                    gram2 = face2.as_parallelogram();
+                if (gram1 === null || gram2 === null)
+                    continue;
+                let direction = edge.direction;
+                let other_direction = gram1.other_direction(direction);
+                if (gram2.other_direction(direction) !== other_direction)
+                    continue;
+                let side1: ParallelogramSide, side2: ParallelogramSide;
+                if (other_direction.skew(direction) > 0) {
+                    side1 = gram1.parallelogram.sides[0];
+                    side2 = gram2.parallelogram.sides[2];
+                } else {
+                    side1 = gram1.parallelogram.sides[1];
+                    side2 = gram2.parallelogram.sides[3];
+                }
+                if (side1.edges.length > 1 || side2.edges.length > 1)
+                    continue;
+                this._join_parallelograms(edge);
+                for (let vertex of edge)
+                    iffy_vertices.add(vertex);
+            }
+            iffy_edges.clear();
         }
     }
 }
