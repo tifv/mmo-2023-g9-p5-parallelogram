@@ -70,16 +70,20 @@ function main() {
 
 function build_uncut_region(): UncutRegion {
     const {M, r} = POLYGON_SIZE;
+    let origin = new Point(0, 0);
     let {polygon, directions, side_length: a} = Polygon.make_regular_even(
-        new Point(0, 0), M, r );
+        origin, M, r );
     let dir1 = directions[1], dir3 = directions[M-1];
     let vec1 = new DirectedVector(dir1, 0.3*a);
     let vec3 = new DirectedVector(dir3, -0.6*a);
     let vec2 = DirectedVector.make_direction(
-        vec1.opposite().add(vec3.opposite()))
-    let triangle1 = Polygon.from_vectors( new Point(-0.5*a, -a),
+        vec1.opposite().add(vec3.opposite()));
+    let s = 0.6 + (M - 3) * 0.25;
+    let triangle1 = Polygon.from_vectors(
+        origin.shift(vec1.scale(-s)).shift(vec3.scale(s)),
         [vec1, vec2, vec3] );
-    let triangle2 = Polygon.from_vectors( new Point(0, +a),
+    let triangle2 = Polygon.from_vectors(
+        origin.shift(vec1.scale(s)).shift(vec3.scale(-s)),
         [vec1.opposite(), vec2.opposite(), vec3.opposite()] )
     let uncut_region = new UncutRegion(polygon, triangle1, triangle2);
     return uncut_region;
@@ -108,6 +112,8 @@ class RegionDrawer {
     outer_face: SVGPathElement;
     triangle1: SVGPathElement;
     triangle2: SVGPathElement;
+    edge_group: SVGGElement;
+    face_group: SVGGElement;
 
     constructor({
         svg: svg,
@@ -117,33 +123,48 @@ class RegionDrawer {
         drag_start: (event: MouseEvent | TouchEvent) => void,
     }) {
         this.svg = svg;
-        this.outer_face = makesvg("path", {
+        this.face_group = makesvg("g", {
             parent: this.svg,
             attributes: {
-                id: "outer_face",
+                "stroke": "none",
+                "fill": "white",
+                "opacity": "0",
+        },
+        });
+        this.edge_group = makesvg("g", {
+            parent: this.svg,
+            attributes: {
+                "stroke": "black",
+                "stroke-width": "0.50px",
+                "stroke-linecap": "round",
+        },
+        });
+        let border_group = makesvg("g", {
+            parent: this.svg,
+            attributes: {
                 "stroke": "black",
                 "stroke-width": "0.75px",
                 "stroke-linejoin": "round",
+        },
+        });
+        this.outer_face = makesvg("path", {
+            parent: border_group,
+            attributes: {
+                id: "outer_face",
                 "fill": "none",
             },
         });
         this.triangle1 = makesvg("path", {
-            parent: this.svg,
+            parent: border_group,
             attributes: {
                 id: "triangle1",
-                "stroke": "black",
-                "stroke-width": "0.75px",
-                "stroke-linejoin": "round",
                 "fill": "rgb(  70%,  85%,  70% )",
             },
         });
         this.triangle2 = makesvg("path", {
-            parent: this.svg,
+            parent: border_group,
             attributes: {
                 id: "triangle1",
-                "stroke": "black",
-                "stroke-width": "0.75px",
-                "stroke-linejoin": "round",
                 "fill": "rgb(  70%,  70%, 100% )",
             },
         });
@@ -157,45 +178,59 @@ class RegionDrawer {
     math_coords = DrawCoords.math_coords
 
     redraw(region: CutRegion) {
-        let elements = Array.from(this.svg.children).filter(
-            element => (['path', 'circle'].indexOf(element.tagName) >= 0) )
-        for (let element of elements) {
-            if (
-                element === this.outer_face ||
-                element === this.triangle1 || element === this.triangle2
-            )
-                continue;
-            this.svg.removeChild(element);
-        }
         this.outer_face.setAttribute( 'd',
-            RegionDrawer._polygon_as_path(region.outer_face) );
+            RegionDrawer._face_as_path(region.outer_face) );
         this.triangle1.setAttribute( 'd',
-            RegionDrawer._polygon_as_path(region.triangle1) );
+            RegionDrawer._face_as_path(region.triangle1) );
         this.triangle2.setAttribute( 'd',
-            RegionDrawer._polygon_as_path(region.triangle2) );
-        let edge_mask = new Set<Edge>([
-            ...region.outer_face,
-            ...region.triangle1, ...region.triangle1
+            RegionDrawer._face_as_path(region.triangle2) );
+
+        let mask = new Set<Edge|Polygon>([
+            ...region.outer_face, region.outer_face,
+            ...region.triangle1, region.triangle1,
+            ...region.triangle2, region.triangle2,
         ]);
-        for (let edge of region.graph.edges) {
-            if (edge_mask.has(edge))
-                continue;
-            makesvg('path', {
+
+        let edge_reuser = new SVGElementReuser<Edge>( this.edge_group,
+            (edge, path) => {
+                path.setAttribute('d', RegionDrawer._edge_as_path(edge));
+            },
+            (edge) => makesvg('path', {
                 attributes: {
                     d: RegionDrawer._edge_as_path(edge),
-                    "stroke": "black",
-                    "stroke-width": "0.50px",
-                    "stroke-linecap": "round",
                 },
-                parent: this.svg,
-            })
+            }),
+        );
+        for (let edge of region.graph.edges) {
+            if (mask.has(edge))
+                continue;
+            edge_reuser.use(edge);
         }
+        edge_reuser.clean();
+
+        let face_reuser = new SVGElementReuser<Polygon>( this.face_group,
+            (face, path) => {
+                path.setAttribute('d', RegionDrawer._face_as_path(face));
+            },
+            (face) => makesvg('path', {
+                attributes: {
+                    d: RegionDrawer._face_as_path(face),
+                },
+            }),
+        );
+        for (let face of region.graph.faces) {
+            if (mask.has(face))
+                continue;
+            face_reuser.use(face);
+        }
+        face_reuser.clean();
+
     }
 
-    static _polygon_as_path(polygon: Polygon) {
+    static _face_as_path(face: Polygon) {
         let path_items = new Array<string|number>();
         let is_first = true;
-        for (let vertex of polygon.vertices) {
+        for (let vertex of face.vertices) {
             let coords = DrawCoords.svg_coords(vertex);
             path_items.push(is_first ? "M" : "L");
             path_items.push(coords.x, coords.y);
@@ -215,6 +250,41 @@ class RegionDrawer {
         ].join(" ");
     }
 
+}
+
+/** Reuse DOM elements because they are kinda expensive */
+class SVGElementReuser<T> {
+    protected parent: SVGGElement;
+    protected index: number;
+    protected reuse: (value: T, element: SVGPathElement) => void;
+    protected build: (value: T) => SVGPathElement;
+
+    constructor(
+        parent: SVGGElement,
+        reuse: (value: T, element: SVGPathElement) => void,
+        build: (value: T) => SVGPathElement,
+    ) {
+        this.parent = parent;
+        this.index = 0;
+        this.reuse = reuse;
+        this.build = build;
+    }
+
+    use(value: T): void {
+        if (this.index < this.parent.children.length) {
+            this.reuse( value,
+                <SVGPathElement>this.parent.children[this.index] );
+        } else {
+            this.parent.appendChild(this.build(value));
+        }
+        ++this.index;
+    }
+
+    clean(): void {
+        while (this.parent.children.length > this.index) {
+            (<SVGPathElement>this.parent.lastChild).remove();
+        }
+    }
 }
 
 class Dragger {
@@ -349,6 +419,7 @@ function makehtml(tag: string, {
 }
 
 function makesvg(tag: "svg", options?: MakeOptions): SVGSVGElement
+function makesvg(tag: "g", options?: MakeOptions): SVGGElement
 function makesvg(tag: "path", options?: MakeOptions): SVGPathElement
 function makesvg(tag: "circle", options?: MakeOptions): SVGCircleElement
 function makesvg(tag: string, options?: MakeOptions): SVGElement
