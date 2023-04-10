@@ -26,6 +26,13 @@ function* itermap<A,B>(values: Iterable<A>, mapper: (value: A) => B):
         yield mapper(value);
 }
 
+function _record_substitute<V>(obj: Record<string,V>, orig: V, repl: V) {
+    for (let [key, value] of Object.entries(obj)) {
+        if (value === orig)
+            obj[key] = repl
+    }
+}
+
 class NumberSet extends Array<number> {
     static from_numbers(numbers: Iterable<number>): NumberSet {
         let set = new NumberSet();

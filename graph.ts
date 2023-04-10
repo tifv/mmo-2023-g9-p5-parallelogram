@@ -46,6 +46,9 @@ export class Vector extends AbstractVector {
     get length() {
         return (this.x**2 + this.y**2)**(1/2);
     }
+    scale(scale: number) : Vector {
+        return new Vector(scale * this.x, scale * this.y);
+    }
     opposite(): Vector {
         return new Vector(-this.x, -this.y);
     }
@@ -65,6 +68,9 @@ export class DirectedVector extends Vector {
         //     direction: {value: direction, enumerable: true},
         //     value:     {value: value    , enumerable: true},
         // });
+    }
+    scale(scale: number) : Vector {
+        return new DirectedVector(this.direction, scale * this.value);
     }
     opposite(): DirectedVector {
         return new DirectedVector(this.direction, -this.value);
@@ -745,9 +751,11 @@ export class PlanarGraph implements GraphLike {
     check(options?: {[name: string]: boolean}): void
     check({
         vertices_without_edges = true,
+        vertices_with_rogue_edges = true,
         edges_with_rogue_vertices = true,
         edges_without_faces = true,
         edges_with_one_face = true,
+        edges_with_rogue_faces = true,
         faces_with_rogue_edges = true,
         face_orientation = true,
         parallelograms = true,
@@ -766,6 +774,22 @@ export class PlanarGraph implements GraphLike {
             }
             if (lone_vertices.length > 0) {
                 errors.push({vertices_without_edges: lone_vertices});
+            }
+        }
+        if (vertices_with_rogue_edges) {
+            let rogue_edges = new Array<Edge>();
+            for (let vertex of this.vertices) {
+                let edges = this.edgemap.get(vertex);
+                if (edges === undefined)
+                    continue;
+                for (let edge of edges) {
+                    if (this.edges.has(edge))
+                        continue;
+                    rogue_edges.push(edge);
+                }
+            }
+            if (rogue_edges.length > 0) {
+                errors.push({vertices_with_rogue_edges: rogue_edges});
             }
         }
         if (edges_with_rogue_vertices) {
@@ -809,6 +833,24 @@ export class PlanarGraph implements GraphLike {
                     onesided_edges.length > 0 ? {one: onesided_edges} : null,
                     {all: zerosided_edges.concat(onesided_edges)},
                 )});
+            }
+        }
+        if (edges_with_rogue_faces) {
+            let rogue_faces = new Array<Polygon>();
+            for (let edge of this.edges) {
+                let faces = this.facemap.get(edge);
+                if (faces === undefined)
+                    continue;
+                for (let face of faces) {
+                    if (face === null)
+                        continue;
+                    if (this.faces.has(face))
+                        continue;
+                    rogue_faces.push(face);
+                }
+            }
+            if (rogue_faces.length > 0) {
+                errors.push({edges_with_rogue_faces: rogue_faces});
             }
         }
         if (faces_with_rogue_edges) {
@@ -971,7 +1013,9 @@ export class PlanarGraph implements GraphLike {
         this.vertices.add(vertex);
         this.edgemap.set(vertex, []);
     }
-    _join_edges(vertex: Point): Edge {
+    _join_edges( vertex: Point,
+        special_faces: Record<string,Polygon>,
+    ): Edge {
         let edgeset = this.vertex_edges(vertex);
         if (edgeset.length !== 2) {
             throw new Error("Can only join two adjacent edges");
@@ -1014,11 +1058,13 @@ export class PlanarGraph implements GraphLike {
                 throw new Error("unreachable");
             if (face1.get_edge(index1+1) !== edge2)
                 throw new Error("unreachable");
-            new_faces.push(new Polygon(
+            let new_face1 = new Polygon(
                 start,
                 [new_edge, ...face1.slice_edges(index1+2, index1)],
-            ));
+            );
+            new_faces.push(new_face1);
             this._remove_face(face1);
+            _record_substitute(special_faces, face1, new_face1);
         }
         if (face2 !== null) {
             let index2 = face2.edges.indexOf(edge2);
@@ -1026,11 +1072,13 @@ export class PlanarGraph implements GraphLike {
                 throw new Error("unreachable");
             if (face2.get_edge(index2+1) !== edge1)
                 throw new Error("unreachable");
-            new_faces.push(new Polygon(
+            let new_face2 = new Polygon(
                 end,
                 [new_edge, ...face2.slice_edges(index2+2, index2)],
-            ));
+            );
+            new_faces.push(new_face2);
             this._remove_face(face2);
+            _record_substitute(special_faces, face2, new_face2);
         }
         if (this.edges.has(edge1) || this.edges.has(edge2))
             throw new Error("unreachable");
@@ -1039,7 +1087,9 @@ export class PlanarGraph implements GraphLike {
         }
         return new_edge;
     }
-    _join_parallelograms(edge: Edge): Polygon {
+    _join_parallelograms( edge: Edge,
+        special_faces: Record<string,Polygon>,
+    ): Polygon {
         let [face1, face2] = this.edge_faces(edge);
         if (face1 === null || face2 === null)
             throw new Error("Can only join two adjacent faces");
@@ -1102,10 +1152,14 @@ export class PlanarGraph implements GraphLike {
         let new_face = new Polygon(start, edges);
         this._remove_face(face1);
         this._remove_face(face2);
+        _record_substitute(special_faces, face1, null);
+        _record_substitute(special_faces, face2, null);
         this._add_face(new_face);
         return new_face;
     }
-    reduce_parallelograms(): void {
+    reduce_parallelograms<F extends string>(
+        special_faces: Record<F,Polygon>,
+    ): Record<F,Polygon> {
         let iffy_vertices = new Set<Point>(this.vertices);
         let iffy_edges = new Set<Edge>(this.edges);
         while (iffy_vertices.size > 0 || iffy_edges.size > 0) {
@@ -1116,7 +1170,7 @@ export class PlanarGraph implements GraphLike {
                 let [edge1, edge2] = edgeset;
                 if (edge1.direction !== edge2.direction)
                     continue;
-                let new_edge = this._join_edges(vertex);
+                let new_edge = this._join_edges(vertex, special_faces);
                 iffy_edges.delete(edge1);
                 iffy_edges.delete(edge2);
                 iffy_edges.add(new_edge);
@@ -1145,12 +1199,13 @@ export class PlanarGraph implements GraphLike {
                 }
                 if (side1.edges.length > 1 || side2.edges.length > 1)
                     continue;
-                this._join_parallelograms(edge);
+                this._join_parallelograms(edge, special_faces);
                 for (let vertex of edge)
                     iffy_vertices.add(vertex);
             }
             iffy_edges.clear();
         }
+        return special_faces;
     }
 }
 

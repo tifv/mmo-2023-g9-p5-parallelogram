@@ -68,7 +68,14 @@ function construct_cut_region(
             ));
         // region.graph.check();
     }
-    region.graph.reduce_parallelograms();
+    Object.assign( region,
+        region.graph.reduce_parallelograms({
+            outer_face: region.outer_face,
+            triangle1: region.triangle1,
+            triangle2: region.triangle2,
+        }),
+    );
+    // region.graph.check();
     return region;
 }
 
