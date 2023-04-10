@@ -20,7 +20,7 @@ jobs:
     - name: Install TypeScript
       run:  npm install typescript
     - name: Create build directory
-      run:  mkdir ./build && cp parallelogram.html ./build/index.html
+      run:  mkdir ./build && cp page.html ./build/index.html
     - name: Compile
       run:  tsc --project .
     - name: Upload
