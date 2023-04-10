@@ -46,7 +46,11 @@ class CutRegion {
 
 }
 
-function construct_cut_region(uncut_region: UncutRegion, flows: Flows) {
+function construct_cut_region(
+    uncut_region: UncutRegion,
+    flows: Flows,
+    chooser: Chooser,
+) {
     let origin = uncut_region.polygon.vertices[0];
     let [vec1, vec2, vec3] = Array.from(
         uncut_region.triangle1.oriented_edges()
@@ -55,11 +59,12 @@ function construct_cut_region(uncut_region: UncutRegion, flows: Flows) {
     var
         sector_start = origin,
         sector_end = region.triangle2.vertices[0];
-    for (let [direction, flow] of Chooser.choose_order(Array.from(flows))) {
+    for (let [direction, flow] of chooser.choose_order(Array.from(flows))) {
         ({region, sector_start, sector_end} =
             Incutter.incut(
                 region, sector_start, sector_end,
                 direction, flow,
+                chooser,
             ));
         // region.graph.check();
     }
@@ -100,6 +105,7 @@ class Incutter {
         sector_end: Point,
         direction: Direction,
         flow: Flow,
+        chooser: Chooser,
     ): {region: CutRegion, sector_start: Point, sector_end: Point} {
         let max_height = Math.abs(flow.sum);
         if (max_height < EPSILON)
@@ -111,7 +117,7 @@ class Incutter {
         let heighted_graph = incutter.build_heighted_graph(max_height);
         heighted_graph.set_face_height(region.triangle1, height1);
         heighted_graph.set_face_height(region.triangle2, height2);
-        incutter.determine_face_heights(heighted_graph, heights);
+        incutter.determine_face_heights(heighted_graph, heights, chooser);
         incutter.determine_edge_heights(heighted_graph);
         incutter.determine_vertex_heights();
 
@@ -219,8 +225,10 @@ class Incutter {
             this.direction, max_height,
         );
     }
-    determine_face_heights( heighted_graph: HeightedFaceGraph,
+    determine_face_heights(
+        heighted_graph: HeightedFaceGraph,
         heights: number[],
+        chooser: Chooser,
     ) {
         while (true) {
             heighted_graph.resolve_iffy_heights();
@@ -232,11 +240,11 @@ class Incutter {
             if (floating_faces.length == 0)
                 break;
             let
-                floating_face = Chooser.choose_face(floating_faces),
+                floating_face = chooser.choose_face(floating_faces),
                 height = heighted_graph.get_face_height(floating_face);
             // XXX set any possible intermediate heights, not just min and max
             heighted_graph.set_face_height( floating_face,
-                Chooser.choose_element([height.min, height.max]) );
+                chooser.choose_element([height.min, height.max]) );
         }
         /**
          * XXX TODO add any underused intermediate heights to vertices

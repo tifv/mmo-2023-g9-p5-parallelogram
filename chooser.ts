@@ -1,5 +1,5 @@
 class TrivialChooser {
-    static add_number(numbers: NumberSet): void {
+    add_number(numbers: NumberSet): void {
         let length = numbers.length;
         let n = 2;
         while (numbers.length == length) {
@@ -8,35 +8,35 @@ class TrivialChooser {
             }
         }
     }
-    static choose_weight(): number {
+    choose_weight(): number {
         return 0;
     }
-    static choose_element<T>(elements: Array<T>): T {
+    choose_element<T>(elements: Array<T>): T {
         return elements[this.choose_index(elements.length)];
     }
-    static *choose_order<T>(elements: Array<T>): Generator<T,void,undefined> {
+    *choose_order<T>(elements: Array<T>): Generator<T,void,undefined> {
         while (elements.length > 0) {
             let index = this.choose_index(elements.length);
             yield* elements.splice(index, 1);
         }
     }
-    static choose_face(faces: Array<Polygon>): Polygon {
+    choose_face(faces: Array<Polygon>): Polygon {
         return this.choose_element(faces);
     }
-    static choose_index(length: number): number {
+    choose_index(length: number): number {
         return 0;
     }
 }
 
 class RandomChooser extends TrivialChooser {
-    static add_number(numbers: NumberSet) {
+    add_number(numbers: NumberSet) {
         numbers.add( Math.random() * (numbers.max() - numbers.min())
             + numbers.min() );
     }
-    static choose_weight(): number {
+    choose_weight(): number {
         return 2 * Math.random() - 1;
     }
-    static choose_index(length: number) {
+    choose_index(length: number) {
         let index = Math.floor(length * Math.random());
         if (index >= length)
             return index - 1;
@@ -44,4 +44,5 @@ class RandomChooser extends TrivialChooser {
     }
 }
 
+type Chooser = TrivialChooser;
 var Chooser = RandomChooser;

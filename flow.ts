@@ -202,7 +202,7 @@ export class UncutRegion {
         return constraints;
     }
 
-    find_flows(): Flows {
+    find_flows(chooser: Chooser): Flows {
         let var_names = this.get_variable_names();
         let constraints = [
             ...this.get_flow_constraints_base(),
@@ -216,7 +216,7 @@ export class UncutRegion {
             let names = var_names.flows(i);
             map_flows(a => {
                 objective.push(
-                    "+", Chooser.choose_weight(), "*", names[a], "/", value );
+                    "+", chooser.choose_weight(), "*", names[a], "/", value );
             });
         }
 
