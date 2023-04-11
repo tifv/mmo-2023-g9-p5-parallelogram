@@ -27,7 +27,9 @@ export class AbstractVector extends Pair {
     scale(scale: number): Vector {
         return new Vector(scale * this.x, scale * this.y);
     }
-    project(direction: Direction) {
+    project(this: Vector, other: UnitVector): number
+    project(this: UnitVector, other: UnitVector): number
+    project(direction: UnitVector) {
         return this.x * direction.x + this.y * direction.y;
     }
     skew(this: Vector, other: Vector): number
@@ -46,6 +48,9 @@ export class UnitVector extends AbstractVector {
     }
     opposite(): UnitVector {
         return new UnitVector(-this.x, -this.y);
+    }
+    perpendicular(): UnitVector {
+        return new UnitVector(-this.y, this.x);
     }
 }
 
@@ -138,15 +143,38 @@ export class Point extends Pair {
         return [new Point(min_x, min_y), new Point(max_x, max_y)];
     }
 
-    static center(...points: Array<Point>): Point {
-        let x = 0, y = 0, n = points.length;
-        if (n < 1)
-            throw new Error("Cannot take average of an empty set");
-        for (let point of points) {
-            x += point.x;
-            y += point.y;
+    static center(
+        points: Array<Point>,
+        weights: Array<number> | null,
+    ): Point {
+        if (weights !== null && points.length !== weights.length)
+            throw new Error("Weights must correspond to points");
+        let total_weight = weights !== null
+            ? weights.reduce((s, x) => s + x, 0)
+            : points.length;
+        if (Math.abs(total_weight) < EPSILON)
+            throw new Error("Cannot take average of an zero-weight set");
+        let x = 0, y = 0;
+        for (let [index, point] of points.entries()) {
+            let weight = weights !== null ? weights[index] : 1;
+            x += point.x * weight;
+            y += point.y * weight;
         }
-        return new Point(x / n, y / n);
+        return new Point(x / total_weight, y / total_weight);
+    }
+
+    static incenter(pA: Point, pB: Point, pC: Point):
+        {incenter: Point, inradius: number}
+    {
+        let incenter = Point.center( [pA, pB, pC], [
+            Vector.between(pB, pC).length,
+            Vector.between(pC, pA).length,
+            Vector.between(pA, pB).length,
+        ]);
+        let sideAB = Vector.between(pA, pB);
+        let inradius = Math.abs(Vector.between(pA, incenter).project(
+            new UnitVector(sideAB.x, sideAB.y).perpendicular() ));
+        return {incenter, inradius};
     }
 }
 
@@ -237,6 +265,11 @@ export class Edge {
         return edges;
     }
 
+    project(point: Point): Point {
+        let direction = this.direction;
+        return point.shift(new UnitVector(-direction.y, direction.x).scale(
+            Vector.between(point, this.start).skew(this.direction) ));
+    }
     project_along(point: Point, direction: UnitVector): Point {
         return point.shift(direction.scale(
             Vector.between(point, this.start)
@@ -531,6 +564,41 @@ export class Polygon {
         };
     }
 
+    get_sides(): Array<PolygonSide> {
+        let sides = new Array<PolygonSide>();
+        for (let {edge, forward, start} of this.oriented_edges()) {
+            let direction = edge.direction;
+            let side: PolygonSide | null = null;
+            get_last_side: {
+                if (sides.length === 0)
+                    break get_last_side;
+                let last_side = sides[sides.length-1];
+                if (
+                    last_side.direction !== direction ||
+                    last_side.forward !== forward
+                )
+                    break get_last_side;
+                side = last_side;
+            }
+            if (side === null) {
+                side = {direction, forward, edges: [], start};
+                sides.push(side);
+            }
+            side.edges.push(edge);
+        }
+        if (sides.length >= 2) {
+            let first_side = sides[0], last_side = sides[sides.length-1];
+            if (
+                last_side.direction === first_side.direction &&
+                last_side.forward   === first_side.forward
+            ) {
+                first_side.edges.unshift(...last_side.edges);
+                sides.pop();
+            }
+        }
+        return sides;
+    }
+
     as_parallelogram(): Parallelogram | null {
         try_cache: {
             let polygon: (
@@ -544,63 +612,26 @@ export class Polygon {
                 return null;
             return polygon;
         }
-        let directions = new Array<Direction>();
-        type Run = {
-            direction: Direction,
-            forward: boolean,
-            edges: Edge[],
-        };
-        let runs = new Array<Run>();
-        for (let {edge, forward} of this.oriented_edges()) {
-            let direction = edge.direction;
-            if (!directions.includes(direction)) {
-                if (directions.length >= 2) {
-                    this.parallelogram = null;
-                    return null;
-                }
-                directions.push(direction);
-                directions.sort((a, b) => a.skew(b));
-            }
-            let run: Run | null = null;
-            get_last_run: {
-                if (runs.length === 0)
-                    break get_last_run;
-                let last_run = runs[runs.length-1];
-                if (
-                    last_run.direction !== direction ||
-                    last_run.forward !== forward
-                )
-                    break get_last_run;
-                run = last_run;
-            }
-            if (run === null) {
-                run = {direction, forward, edges: []};
-                runs.push(run);
-            }
-            run.edges.push(edge);
-        }
-        if (runs.length > 5 || runs.length < 4) {
+        let sides = this.get_sides();
+        let directions: Array<Direction> =
+            Array.from(new Set(sides.map(({direction}) => direction)));
+        if (directions.length > 2) {
             this.parallelogram = null;
             return null;
         }
-        if (runs.length == 5) {
-            if (
-                runs[4].direction !== runs[0].direction ||
-                runs[4].forward   !== runs[0].forward
-            ) {
-                throw new Error("unreachable");
-            }
-            runs[0].edges.unshift(...runs[4].edges);
-            runs.pop();
+        directions.sort((a, b) => a.skew(b));
+        if (sides.length != 4) {
+            this.parallelogram = null;
+            return null;
         }
-        let [index = null] = filtermap( runs, (run, index) =>
+        let [index = null] = filtermap( sides, (run, index) =>
                 (run.direction === directions[0] && run.forward === true) ?
                     index : null );
         if (index === null) {
             throw new Error("unreachable");
         }
-        runs.splice(4 - index, 0, ...runs.splice(0, index));
-        let [a, b, c, d] = runs;
+        sides.splice(4 - index, 0, ...sides.splice(0, index));
+        let [a, b, c, d] = sides;
         if (
             a.direction !== directions[0] || a.forward !== true  ||
             b.direction !== directions[1] || b.forward !== true  ||
@@ -631,8 +662,8 @@ export class Polygon {
     }
 }
 
-type ParallelogramSide =
-    {direction: Direction, forward: boolean, edges: Edge[]}
+type PolygonSide =
+    {direction: Direction, forward: boolean, start: Point, edges: Edge[]}
 type ParallelogramInfo = {
     /** Directions are ordered in the positive rotation order. */
     directions: [Direction, Direction],
@@ -645,10 +676,10 @@ type ParallelogramInfo = {
      *  the polygon itself.
      */
     sides: [
-        ParallelogramSide,
-        ParallelogramSide,
-        ParallelogramSide,
-        ParallelogramSide,
+        PolygonSide,
+        PolygonSide,
+        PolygonSide,
+        PolygonSide,
     ],
 }
 export type Parallelogram = Polygon & {parallelogram: ParallelogramInfo};
@@ -1203,7 +1234,7 @@ export class PlanarGraph implements GraphLike {
                 let other_direction = gram1.other_direction(direction);
                 if (gram2.other_direction(direction) !== other_direction)
                     continue;
-                let side1: ParallelogramSide, side2: ParallelogramSide;
+                let side1: PolygonSide, side2: PolygonSide;
                 if (other_direction.skew(direction) > 0) {
                     side1 = gram1.parallelogram.sides[0];
                     side2 = gram2.parallelogram.sides[2];
@@ -1249,7 +1280,7 @@ export class PlanarGraph implements GraphLike {
             let trace_direction: UnitVector = face.other_direction(direction);
             if ((forward ? +1 : -1) * trace_direction.skew(direction) > 0)
                 trace_direction = trace_direction.opposite();
-            let side: ParallelogramSide | null = null;
+            let side: PolygonSide | null = null;
             for (let s of face.parallelogram.sides) {
                 if (s.direction === direction && s.forward === forward) {
                     side = s;
