@@ -39,7 +39,7 @@ function main() {
             chooser.offspring() );
         drawer.redraw(cut_region);
     };
-    let dragger = new PointerWatcher({
+    let pointer_watcher = new PointerWatcher({
         uncut_region,
         drawer,
         reload,
@@ -54,8 +54,8 @@ function build_uncut_region(): UncutRegion {
     let {polygon, directions, side_length: a} = Polygon.make_regular_even(
         origin, M, r );
     let dir1 = directions[1], dir3 = directions[M-1];
-    let vec1 = new DirectedVector(dir1, 0.3*a);
-    let vec3 = new DirectedVector(dir3, -0.6*a);
+    let vec1 = new DirectedVector(dir1, 0.4*a);
+    let vec3 = new DirectedVector(dir3, -0.8*a);
     let vec2 = DirectedVector.make_direction(
         vec1.opposite().add(vec3.opposite()));
     let s = 0.6 + (M - 3) * 0.25;
@@ -99,6 +99,11 @@ class RegionDrawer {
     triangle2: SVGPathElement;
     edge_group: SVGGElement;
     face_group: SVGGElement;
+    trace_group: SVGGElement;
+
+    graph?: PlanarGraph
+    face_by_path: Map<SVGPathElement,Parallelogram> = new Map();
+    path_by_face: Map<Parallelogram,SVGPathElement> = new Map();
 
     constructor({
         svg: svg,
@@ -106,9 +111,20 @@ class RegionDrawer {
         svg: SVGSVGElement,
     }) {
         this.svg = svg;
+        this.trace_group = makesvg("g", {
+            parent: this.svg,
+            attributes: {
+                id: "trace_g",
+                "stroke": "black",
+                "stroke-linecap": "round",
+                "stroke-linejoin": "round",
+                "fill": "none",
+        },
+        });
         this.face_group = makesvg("g", {
             parent: this.svg,
             attributes: {
+                id: "face_g",
                 "stroke": "none",
                 "fill": "white",
                 "opacity": "0",
@@ -117,6 +133,7 @@ class RegionDrawer {
         this.edge_group = makesvg("g", {
             parent: this.svg,
             attributes: {
+                id: "edge_g",
                 "stroke": "black",
                 "stroke-width": "0.50px",
                 "stroke-linecap": "round",
@@ -141,7 +158,7 @@ class RegionDrawer {
             parent: border_group,
             attributes: {
                 id: "triangle1",
-                "fill": "rgb(  70%,  85%,  70% )",
+                "fill": "rgb(  70%,  90%,  70% )",
             },
         });
         this.triangle2 = makesvg("path", {
@@ -157,12 +174,14 @@ class RegionDrawer {
     math_coords = DrawCoords.math_coords
 
     redraw(region: CutRegion) {
+        this.graph = region.graph;
+
         this.outer_face.setAttribute( 'd',
-            RegionDrawer._face_as_path(region.outer_face) );
+            RegionDrawer._face_as_d(region.outer_face) );
         this.triangle1.setAttribute( 'd',
-            RegionDrawer._face_as_path(region.triangle1) );
+            RegionDrawer._face_as_d(region.triangle1) );
         this.triangle2.setAttribute( 'd',
-            RegionDrawer._face_as_path(region.triangle2) );
+            RegionDrawer._face_as_d(region.triangle2) );
 
         let mask = new Set<Edge|Polygon>([
             ...region.outer_face, region.outer_face,
@@ -172,33 +191,83 @@ class RegionDrawer {
 
         new SVGPathProvider<Edge>( this.edge_group,
             (path, edge) => {
-                path.setAttribute('d', RegionDrawer._edge_as_path(edge));
+                path.setAttribute('d', RegionDrawer._edge_as_d(edge));
             },
-        ).use_with_each(filtermap( region.graph.edges, (edge) =>
+        ).use_with_each(filtermap( this.graph.edges, (edge) =>
             mask.has(edge) ? null : edge ));
 
+        this.face_by_path.clear();
+        this.path_by_face.clear();
         new SVGPathProvider<Polygon>( this.face_group,
             (path, face) => {
-                path.setAttribute('d', RegionDrawer._face_as_path(face));
+                path.setAttribute('d', RegionDrawer._face_as_d(face));
+                let parallelogram = face.as_parallelogram();
+                if (parallelogram === null)
+                    return;
+                this.face_by_path.set(path, parallelogram);
+                this.path_by_face.set(parallelogram, path);
             },
-        ).use_with_each(filtermap( region.graph.faces, (face) =>
+        ).use_with_each(filtermap( this.graph.faces, (face) =>
             mask.has(face) ? null : face ));
     }
 
-    static _face_as_path(face: Polygon) {
-        let path_items = new Array<string|number>();
-        let is_first = true;
-        for (let vertex of face.vertices) {
-            let coords = DrawCoords.svg_coords(vertex);
-            path_items.push(is_first ? "M" : "L");
-            path_items.push(coords.x, coords.y);
-            is_first = false;
+    redraw_trace(start: {point: Point, face: Parallelogram} | null) {
+        if (start === null) {
+            SVGPathProvider.clean(this.trace_group);
+            this._highlight_faces(new Set());
+            return;
         }
-        path_items.push("Z");
-        return path_items.join(" ");
+        if (this.graph === undefined)
+            return;
+        let path_provider = new SVGPathProvider( this.trace_group,
+            (path, d: string) => { path.setAttribute('d', d); },
+        );
+        let hightlighted_faces = new Set<Parallelogram>();
+        for (let direction of start.face.parallelogram.directions) {
+            let points = new Array<Point>();
+            for (let forward of [true, false]) {
+                let subpoints = new Array<Point>();
+                for (let item of this.graph.trace_through_parallelograms(
+                    {start, direction, forward},
+                )) {
+                    if (item instanceof Point) {
+                        subpoints.push(item);
+                        continue;
+                    }
+                    hightlighted_faces.add(item);
+                }
+                if (forward) {
+                    points.push(...subpoints);
+                } else {
+                    points.unshift(...subpoints.reverse());
+                }
+            }
+            path_provider.use_with(RegionDrawer._points_as_d(points));
+        }
+        path_provider.clean();
+        this._highlight_faces(hightlighted_faces);
     }
 
-    static _edge_as_path(edge: Edge) {
+    _highlight_faces(faces: Set<Parallelogram>) {
+        for (let path of this.face_group.children) {
+            if (!(path instanceof SVGPathElement))
+                continue;
+            let face = this.face_by_path.get(path);
+            if (face === undefined)
+                continue;
+            if (faces.has(face)) {
+                path.classList.add('highlighted');
+            } else {
+                path.classList.remove('highlighted');
+            }
+        }
+    }
+
+    static _face_as_d(face: Polygon): string {
+        return this._points_as_d(face.vertices, true);
+    }
+
+    static _edge_as_d(edge: Edge): string {
         let
             start = DrawCoords.svg_coords(edge.start),
             end   = DrawCoords.svg_coords(edge.end);
@@ -206,6 +275,23 @@ class RegionDrawer {
             "M", start.x, start.y,
             "L", end  .x, end  .y,
         ].join(" ");
+    }
+
+    static _points_as_d(
+        points: Array<Point>,
+        cycle: boolean = false,
+    ): string {
+        let path_items = new Array<string|number>();
+        let is_first = true;
+        for (let point of points) {
+            let coords = DrawCoords.svg_coords(point);
+            path_items.push(is_first ? "M" : "L");
+            path_items.push(coords.x, coords.y);
+            is_first = false;
+        }
+        if (cycle)
+            path_items.push("Z");
+        return path_items.join(" ");
     }
 
 }
@@ -256,6 +342,10 @@ class SVGPathProvider<T> {
             element.remove();
         }
     }
+
+    static clean(parent: SVGGElement): void {
+        new SVGPathProvider<void>(parent, () => {}).clean();
+    }
 }
 
 // fix a lack in ts 4.9.5
@@ -277,6 +367,13 @@ class PointerWatcher {
         offset: Vector,
     } | null = null;
 
+    trace: {
+        point: Point,
+        face: Parallelogram,
+        cancel: () => void,
+        clear: () => void,
+    } | null = null;
+
     reload: () => void;
 
     constructor( {
@@ -294,7 +391,7 @@ class PointerWatcher {
             drag_start = this.drag_start.bind(this),
             drag_move  = this.drag_move .bind(this),
             drag_end   = this.drag_end  .bind(this),
-            face_move  = this.face_move      .bind(this);
+            face_move  = this.face_move .bind(this);
 
         this.drawer = drawer;
         this.drawer.triangle1.addEventListener('mousedown' , drag_start);
@@ -303,14 +400,15 @@ class PointerWatcher {
         this.drawer.triangle2.addEventListener('touchstart', drag_start);
 
         this.drawer.face_group.addEventListener('mousemove', face_move);
+        this.drawer.face_group.addEventListener('click'    , face_move);
 
         this.container = document.body;
-        this.container.addEventListener('mousemove',   drag_move);
-        this.container.addEventListener('mouseup',     drag_end );
-        this.container.addEventListener('mouseleave',  drag_end );
-        this.container.addEventListener('touchmove',   drag_move);
-        this.container.addEventListener('touchend',    drag_end );
-        this.container.addEventListener('touchleave',  drag_end );
+        this.container.addEventListener('mousemove'  , drag_move);
+        this.container.addEventListener('mouseup'    , drag_end );
+        this.container.addEventListener('mouseleave' , drag_end );
+        this.container.addEventListener('touchmove'  , drag_move);
+        this.container.addEventListener('touchend'   , drag_end );
+        this.container.addEventListener('touchleave' , drag_end );
         this.container.addEventListener('touchcancel', drag_end );
         this.reload = reload;
     }
@@ -347,6 +445,32 @@ class PointerWatcher {
     face_move(event: MouseEvent | TouchEvent): void {
         if (this.drag !== null)
             return;
+        let target = event.target;
+        if (target === null || !(target instanceof SVGPathElement))
+            return;
+        let path = target;
+        let face = this.drawer.face_by_path.get(path);
+        if (face === undefined)
+            return;
+        let point = this._get_pointer_coords(event);
+        if (this.trace) {
+            this.trace.cancel();
+        }
+        let trace = this.trace = {
+            point, face,
+            cancel: () => {
+                path.removeEventListener('mouseleave', trace.clear);
+                this.trace = null;
+            },
+            clear: () => {
+                if (this.trace !== trace)
+                    return;
+                this.drawer.redraw_trace(null);
+                trace.cancel();
+            },
+        }
+        this.drawer.redraw_trace({point, face});
+        path.addEventListener('mouseleave', trace.clear);
     }
     drag_move(event: MouseEvent | TouchEvent): void {
         if (this.drag === null)

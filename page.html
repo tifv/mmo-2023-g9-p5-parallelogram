@@ -11,6 +11,20 @@
     #triangle1, #triangle2 {
         cursor: move;
     }
+    #face_g { /* override SVG attributes */
+        opacity: 1;
+    }
+    #face_g > path {
+        opacity: 0;
+    }
+    #face_g > path.highlighted {
+        fill: rgb(100%, 65%, 0%);
+        opacity: 0.15;
+    }
+    #trace_g > path {
+        stroke: rgb( 100%,  65%,  0%);
+        opacity: 0.5;
+    }
 </style>
     </head>
     <body>

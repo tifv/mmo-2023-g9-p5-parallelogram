@@ -57,7 +57,7 @@ export class UncutRegion {
         let {
             forward:  {vertex: sector_start, index: start_index},
             backward: {vertex: sector_end,   index: end_index},
-        } = this.polygon.find_tangent_points(diagonal.opposite());
+        } = this.polygon.find_tangent_points(diagonal.opposite().unit());
         if (
             sector_start === sector_end ||
             modulo(end_index - start_index, this.polygon.edges.length) !=

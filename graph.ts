@@ -21,18 +21,40 @@ export class AbstractVector extends Pair {
     opposite(): AbstractVector {
         return new AbstractVector(-this.x, -this.y);
     }
+    unit(): UnitVector {
+        return new UnitVector(this.x, this.y);
+    }
+    scale(scale: number): Vector {
+        return new Vector(scale * this.x, scale * this.y);
+    }
     project(direction: Direction) {
         return this.x * direction.x + this.y * direction.y;
     }
-    skew(vector: AbstractVector) {
-        return this.y * vector.x - this.x * vector.y;
+    skew(this: Vector, other: Vector): number
+    skew(this: Vector, other: UnitVector): number
+    skew(this: UnitVector, other: UnitVector): number
+    skew(other: AbstractVector): number {
+        return this.y * other.x - this.x * other.y;
     }
 }
 
-export class Direction extends AbstractVector {
+export class UnitVector extends AbstractVector {
+    get length(): 1 { return 1; }
     constructor(x: number, y: number) {
         let length = (x**2 + y**2)**(1/2);
         super(x / length, y / length);
+    }
+    opposite(): UnitVector {
+        return new UnitVector(-this.x, -this.y);
+    }
+}
+
+const IS_DIRECTION = Symbol();
+
+export class Direction extends UnitVector {
+    get [IS_DIRECTION](): true { return true; }
+    scale(scale: number) : DirectedVector {
+        return new DirectedVector(this, scale);
     }
     static from_angle(angle: number) {
         return new Direction(Math.cos(angle), Math.sin(angle));
@@ -43,17 +65,21 @@ export class Vector extends AbstractVector {
     static between(start: Point, end: Point) {
         return new Vector(end.x - start.x, end.y - start.y);
     }
-    get length() {
+    get length(): number {
         return (this.x**2 + this.y**2)**(1/2);
-    }
-    scale(scale: number) : Vector {
-        return new Vector(scale * this.x, scale * this.y);
     }
     opposite(): Vector {
         return new Vector(-this.x, -this.y);
     }
     add(other: Vector) {
         return new Vector(this.x + other.x, this.y + other.y);
+    }
+    decompose(dir1: UnitVector, dir2: UnitVector): [number, number] {
+        let det = dir1.skew(dir2);
+        if (Math.abs(det) < EPSILON)
+            throw new Error("Cannot decompose a vector " +
+                "into collinear directions" );
+        return [this.skew(dir2) / det, -this.skew(dir1) / det];
     }
 }
 
@@ -69,7 +95,7 @@ export class DirectedVector extends Vector {
         //     value:     {value: value    , enumerable: true},
         // });
     }
-    scale(scale: number) : Vector {
+    scale(scale: number): DirectedVector {
         return new DirectedVector(this.direction, scale * this.value);
     }
     opposite(): DirectedVector {
@@ -189,7 +215,6 @@ export class Edge {
         return new Edge(
             this.start.shift(vector), this.delta, this.end.shift(vector) );
     }
-
     split_from(start: Point, values: number[]): Array<Edge> {
         let vertex = start;
         let edges: Edge[] = [];
@@ -210,6 +235,12 @@ export class Edge {
             edges.push(last_edge);
         }
         return edges;
+    }
+
+    project_along(point: Point, direction: UnitVector): Point {
+        return point.shift(direction.scale(
+            Vector.between(point, this.start)
+                .decompose(direction, this.direction)[0] ));
     }
 
     substitute(
@@ -250,9 +281,7 @@ export class Polygon {
     edges: Array<Edge>;
     size: number;
     vertices: Array<Point>;
-    parallelogram: {
-        sides: ParallelogramInfo["sides"]
-    } | null | undefined = undefined;
+    parallelogram: ParallelogramInfo | null | undefined = undefined;
 
     // id: any = crypto.randomUUID().substring(0, 8);
 
@@ -394,7 +423,7 @@ export class Polygon {
         return polygon;
     }
 
-    find_tangent_points(direction: AbstractVector): {
+    find_tangent_points(direction: UnitVector): {
         forward: { vertex: Point; index: number; };
         backward: { vertex: Point; index: number; };
     } {
@@ -582,8 +611,12 @@ export class Polygon {
             this.parallelogram = null;
             return null;
         }
-        let info: ParallelogramInfo = { sides:
-            <[Run,Run,Run,Run]>[a, b, c, d] };
+        if (directions.length !== 2)
+            throw new Error("unreachable");
+        let info: ParallelogramInfo = {
+            directions: <[Direction, Direction]>directions,
+            sides: [a, b, c, d],
+        };
         let polygon = Object.assign(this, {parallelogram: info});
         return polygon;
     }
@@ -601,12 +634,15 @@ export class Polygon {
 type ParallelogramSide =
     {direction: Direction, forward: boolean, edges: Edge[]}
 type ParallelogramInfo = {
+    /** Directions are ordered in the positive rotation order. */
+    directions: [Direction, Direction],
     /** There is very specific order to the sides:
-     *  - primary direction is the one to the right of two directions
-     *  - 1st side is the forward primary direction;
-     *  - 2nd side is the forward other direction;
-     *  - 3rd side is the backward primary direction;
-     *  - 4th side is the backward other direction.
+     *  - 1st side is the forward 1st direction;
+     *  - 2nd side is the forward 2nd direction;
+     *  - 3rd side is the backward 1st direction;
+     *  - 4th side is the backward 2nd direction.
+     *  This also must be the order in which the edges occur in
+     *  the polygon itself.
      */
     sides: [
         ParallelogramSide,
@@ -615,7 +651,7 @@ type ParallelogramInfo = {
         ParallelogramSide,
     ],
 }
-type Parallelogram = Polygon & {parallelogram: ParallelogramInfo};
+export type Parallelogram = Polygon & {parallelogram: ParallelogramInfo};
 
 export type GraphLike = {
     vertices: Iterable<Point>,
@@ -1185,6 +1221,65 @@ export class PlanarGraph implements GraphLike {
         }
         return special_faces;
     }
+    /**
+     *  @yields series of points on edges
+     *  intermitted with corresponding faces
+     */
+    *trace_through_parallelograms({
+        start,
+        direction,
+        forward,
+    }: {
+        start: {
+            point: Point,
+            face: Parallelogram,
+        },
+        direction: Direction,
+        forward: boolean,
+    }):
+        Iterable<Point|Parallelogram>
+    {
+        let point: Point, face: Parallelogram | null;
+        ({point, face} = start);
+        while (true) {
+            yield point;
+            if (face === null)
+                break;
+            yield face;
+            let trace_direction: UnitVector = face.other_direction(direction);
+            if ((forward ? +1 : -1) * trace_direction.skew(direction) > 0)
+                trace_direction = trace_direction.opposite();
+            let side: ParallelogramSide | null = null;
+            for (let s of face.parallelogram.sides) {
+                if (s.direction === direction && s.forward === forward) {
+                    side = s;
+                    break;
+                }
+            }
+            if (side === null)
+                throw new Error("Direction does not belong to the face");
+            let edge: Edge | null = null;
+            for (let e of side.edges) {
+                let end = forward ? e.end : e.start;
+                if (Vector.between(point, end).skew(trace_direction)
+                        > -EPSILON
+                ) {
+                    edge = e;
+                    break;
+                }
+            }
+            if (edge === null) {
+                edge = side.edges[side.edges.length - 1];
+            }
+            point = edge.project_along(point, trace_direction);
+            let [other_face] = this.edge_faces(edge).filter(f => f !== face);
+            if (other_face === null) {
+                face = null;
+                continue;
+            }
+            face = other_face.as_parallelogram();
+        }
+    }
 }
 
 function record_substitute<V>(obj: Record<string,V>, orig: V, repl: V) {
@@ -1202,5 +1297,6 @@ import DirectedVector = Graphs.DirectedVector;
 import Point = Graphs.Point;
 import Edge = Graphs.Edge;
 import Polygon = Graphs.Polygon;
+import Parallelogram = Graphs.Parallelogram;
 import PlanarGraph = Graphs.PlanarGraph;
 
