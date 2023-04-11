@@ -39,7 +39,7 @@ function main() {
             chooser.offspring() );
         drawer.redraw(cut_region);
     };
-    let dragger = new Dragger({
+    let dragger = new PointerWatcher({
         uncut_region,
         drawer,
         reload,
@@ -170,40 +170,19 @@ class RegionDrawer {
             ...region.triangle2, region.triangle2,
         ]);
 
-        let edge_reuser = new SVGElementReuser<Edge>( this.edge_group,
-            (edge, path) => {
+        new SVGPathProvider<Edge>( this.edge_group,
+            (path, edge) => {
                 path.setAttribute('d', RegionDrawer._edge_as_path(edge));
             },
-            (edge) => makesvg('path', {
-                attributes: {
-                    d: RegionDrawer._edge_as_path(edge),
-                },
-            }),
-        );
-        for (let edge of region.graph.edges) {
-            if (mask.has(edge))
-                continue;
-            edge_reuser.use(edge);
-        }
-        edge_reuser.clean();
+        ).use_with_each(filtermap( region.graph.edges, (edge) =>
+            mask.has(edge) ? null : edge ));
 
-        let face_reuser = new SVGElementReuser<Polygon>( this.face_group,
-            (face, path) => {
+        new SVGPathProvider<Polygon>( this.face_group,
+            (path, face) => {
                 path.setAttribute('d', RegionDrawer._face_as_path(face));
             },
-            (face) => makesvg('path', {
-                attributes: {
-                    d: RegionDrawer._face_as_path(face),
-                },
-            }),
-        );
-        for (let face of region.graph.faces) {
-            if (mask.has(face))
-                continue;
-            face_reuser.use(face);
-        }
-        face_reuser.clean();
-
+        ).use_with_each(filtermap( region.graph.faces, (face) =>
+            mask.has(face) ? null : face ));
     }
 
     static _face_as_path(face: Polygon) {
@@ -232,36 +211,49 @@ class RegionDrawer {
 }
 
 /** Reuse DOM elements because they are kinda expensive */
-class SVGElementReuser<T> {
+class SVGPathProvider<T> {
     protected parent: SVGGElement;
     protected index: number;
-    protected reuse: (value: T, element: SVGPathElement) => void;
-    protected build: (value: T) => SVGPathElement;
+    protected _use: (element: SVGPathElement, value: T) => void;
 
     constructor(
         parent: SVGGElement,
-        reuse: (value: T, element: SVGPathElement) => void,
-        build: (value: T) => SVGPathElement,
+        use: (element: SVGPathElement, value: T) => void,
     ) {
         this.parent = parent;
         this.index = 0;
-        this.reuse = reuse;
-        this.build = build;
+        this._use = use;
     }
 
-    use(value: T): void {
-        if (this.index < this.parent.children.length) {
-            this.reuse( value,
-                <SVGPathElement>this.parent.children[this.index] );
-        } else {
-            this.parent.appendChild(this.build(value));
+    use_with(value: T): void {
+        let element: SVGPathElement;
+        while (true) {
+            if (this.index >= this.parent.children.length) {
+                this.parent.appendChild(element = makesvg('path'));
+                ++this.index;
+                break;
+            }
+            let e = this.parent.children[this.index++];
+            if (e instanceof SVGPathElement) {
+                element = e;
+                break;
+            }
         }
-        ++this.index;
+        this._use(element, value);
+    }
+
+    use_with_each(values: Iterable<T>): void {
+        for (let value of values)
+            this.use_with(value);
+        this.clean();
     }
 
     clean(): void {
         while (this.parent.children.length > this.index) {
-            (<SVGPathElement>this.parent.lastChild).remove();
+            let element = this.parent.lastChild;
+            if (element === null)
+                break;
+            element.remove();
         }
     }
 }
@@ -275,7 +267,7 @@ interface HTMLElement {
     ): void;
 }
 
-class Dragger {
+class PointerWatcher {
     uncut_region: UncutRegion;
     drawer: RegionDrawer;
     container: HTMLElement;
@@ -299,24 +291,27 @@ class Dragger {
         this.uncut_region = uncut_region;
 
         let
-            start = this.start.bind(this),
-            move  = this.move .bind(this),
-            end   = this.end  .bind(this);
+            drag_start = this.drag_start.bind(this),
+            drag_move  = this.drag_move .bind(this),
+            drag_end   = this.drag_end  .bind(this),
+            face_move  = this.face_move      .bind(this);
 
         this.drawer = drawer;
-        this.drawer.triangle1.addEventListener('mousedown' , start);
-        this.drawer.triangle1.addEventListener('touchstart', start);
-        this.drawer.triangle2.addEventListener('mousedown' , start);
-        this.drawer.triangle2.addEventListener('touchstart', start);
+        this.drawer.triangle1.addEventListener('mousedown' , drag_start);
+        this.drawer.triangle1.addEventListener('touchstart', drag_start);
+        this.drawer.triangle2.addEventListener('mousedown' , drag_start);
+        this.drawer.triangle2.addEventListener('touchstart', drag_start);
+
+        this.drawer.face_group.addEventListener('mousemove', face_move);
 
         this.container = document.body;
-        this.container.addEventListener('mousemove',   move);
-        this.container.addEventListener('mouseup',     end );
-        this.container.addEventListener('mouseleave',  end );
-        this.container.addEventListener('touchmove',   move);
-        this.container.addEventListener('touchend',    end );
-        this.container.addEventListener('touchleave',  end );
-        this.container.addEventListener('touchcancel', end );
+        this.container.addEventListener('mousemove',   drag_move);
+        this.container.addEventListener('mouseup',     drag_end );
+        this.container.addEventListener('mouseleave',  drag_end );
+        this.container.addEventListener('touchmove',   drag_move);
+        this.container.addEventListener('touchend',    drag_end );
+        this.container.addEventListener('touchleave',  drag_end );
+        this.container.addEventListener('touchcancel', drag_end );
         this.reload = reload;
     }
 
@@ -334,7 +329,7 @@ class Dragger {
             y: (pointer.clientY - ctm.f) / ctm.d,
         });
     }
-    start(event: MouseEvent | TouchEvent) {
+    drag_start(event: MouseEvent | TouchEvent) {
         let target = event.target;
         let triangle: 1|2;
         if (target === this.drawer.triangle1) {
@@ -349,10 +344,11 @@ class Dragger {
         this.drag = { triangle, offset:
             Vector.between(this._get_pointer_coords(event), point) };
     }
-    start_touch(event: TouchEvent) {
-        this.start(event);
+    face_move(event: MouseEvent | TouchEvent): void {
+        if (this.drag !== null)
+            return;
     }
-    move(event: MouseEvent | TouchEvent): void {
+    drag_move(event: MouseEvent | TouchEvent): void {
         if (this.drag === null)
             return;
         let point = this._get_pointer_coords(event).shift(
@@ -369,7 +365,7 @@ class Dragger {
             this.reload();
         }
     }
-    end(event: MouseEvent | TouchEvent) {
+    drag_end(event: MouseEvent | TouchEvent) {
         this.drag = null;
     }
 }
