@@ -2,6 +2,8 @@ document.addEventListener('DOMContentLoaded', async function meta_main() {
     await main();
 });
 
+const HINT_ICON_TEXT = "open_with";
+
 async function main(): Promise<void> {
     const M = window.matchMedia(
         "(width >= 600px) and (height >= 600px)"
@@ -46,7 +48,7 @@ async function main(): Promise<void> {
 
     reload();
 
-    document.fonts.load('24px Matrial Icons').then( () => {
+    document.fonts.load('10px Matrial Icons', HINT_ICON_TEXT).then( () => {
         drawer.add_drag_hints();
     })
 
@@ -370,7 +372,7 @@ class RegionDrawer {
     add_drag_hints() {
         this.triangle1.hint = makesvg("text", {
             parent: this.triangle1.group,
-            text: "pan_tool_alt",
+            text: HINT_ICON_TEXT,
             attributes: {
                 id: "triangle1_hint",
                 "visibility": "hidden",
@@ -379,7 +381,7 @@ class RegionDrawer {
         });
         this.triangle2.hint = makesvg("text", {
             parent: this.triangle2.group,
-            text: "pan_tool_alt",
+            text: HINT_ICON_TEXT,
             attributes: {
                 id: "triangle1_hint",
                 "visibility": "hidden",
