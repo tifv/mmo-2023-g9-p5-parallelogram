@@ -266,6 +266,15 @@ class SVGElementReuser<T> {
     }
 }
 
+// fix a lack in ts 4.9.5
+interface HTMLElement {
+    addEventListener<K extends "touchleave">(
+        type: K,
+        listener: (this: HTMLElement, ev: TouchEvent) => any,
+        options?: boolean | AddEventListenerOptions,
+    ): void;
+}
+
 class Dragger {
     uncut_region: UncutRegion;
     drawer: RegionDrawer;
@@ -301,14 +310,13 @@ class Dragger {
         this.drawer.triangle2.addEventListener('touchstart', start);
 
         this.container = document.body;
-        this.container.addEventListener('mousemove', move);
-        this.container.addEventListener('mouseup', end);
-        this.container.addEventListener('mouseleave', end);
-        this.container.addEventListener('touchmove', move);
-        this.container.addEventListener('touchend', end);
-        this.container.addEventListener('touchleave',
-            <(e: Event) => void> end);
-        this.container.addEventListener('touchcancel', end);
+        this.container.addEventListener('mousemove',   move);
+        this.container.addEventListener('mouseup',     end );
+        this.container.addEventListener('mouseleave',  end );
+        this.container.addEventListener('touchmove',   move);
+        this.container.addEventListener('touchend',    end );
+        this.container.addEventListener('touchleave',  end );
+        this.container.addEventListener('touchcancel', end );
         this.reload = reload;
     }
 
