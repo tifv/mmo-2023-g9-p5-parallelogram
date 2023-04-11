@@ -30,9 +30,6 @@ function main() {
 
     let drawer = new RegionDrawer({
         svg: svg,
-        drag_start: (event) => {
-            dragger.start(event);
-        }
     });
     let chooser = Choosers.CoprimeChooser.default();
     let reload = () => {
@@ -46,24 +43,7 @@ function main() {
         uncut_region,
         drawer,
         reload,
-    })
-
-    document.body.addEventListener('mousemove',
-        (event) => { dragger.move(event); } );
-
-    document.body.addEventListener('mouseup',
-        (event) => { dragger.end(event); } );
-    document.body.addEventListener('mouseleave',
-        (event) => { dragger.end(event); } );
-
-    document.body.addEventListener('touchmove',
-        (event) => { dragger.move(event); } );
-    document.body.addEventListener('touchend',
-        (event) => { dragger.end(event); } );
-    document.body.addEventListener('touchleave',
-        (event) => { dragger.end(<MouseEvent|TouchEvent>event); } );
-    document.body.addEventListener('touchcancel',
-        (event) => { dragger.end(event); } );
+    });
 
     reload();
 }
@@ -122,10 +102,8 @@ class RegionDrawer {
 
     constructor({
         svg: svg,
-        drag_start,
     }: {
         svg: SVGSVGElement,
-        drag_start: (event: MouseEvent | TouchEvent) => void,
     }) {
         this.svg = svg;
         this.face_group = makesvg("g", {
@@ -173,10 +151,6 @@ class RegionDrawer {
                 "fill": "rgb(  70%,  70%, 100% )",
             },
         });
-        this.triangle1.addEventListener('mousedown' , drag_start);
-        this.triangle1.addEventListener('touchstart', drag_start);
-        this.triangle2.addEventListener('mousedown' , drag_start);
-        this.triangle2.addEventListener('touchstart', drag_start);
     };
 
     svg_coords  = DrawCoords.svg_coords
@@ -295,6 +269,7 @@ class SVGElementReuser<T> {
 class Dragger {
     uncut_region: UncutRegion;
     drawer: RegionDrawer;
+    container: HTMLElement;
 
     drag: {
         triangle: 1 | 2,
@@ -313,7 +288,27 @@ class Dragger {
         reload: () => void,
     }) {
         this.uncut_region = uncut_region;
+
+        let
+            start = this.start.bind(this),
+            move  = this.move .bind(this),
+            end   = this.end  .bind(this);
+
         this.drawer = drawer;
+        this.drawer.triangle1.addEventListener('mousedown' , start);
+        this.drawer.triangle1.addEventListener('touchstart', start);
+        this.drawer.triangle2.addEventListener('mousedown' , start);
+        this.drawer.triangle2.addEventListener('touchstart', start);
+
+        this.container = document.body;
+        this.container.addEventListener('mousemove', move);
+        this.container.addEventListener('mouseup', end);
+        this.container.addEventListener('mouseleave', end);
+        this.container.addEventListener('touchmove', move);
+        this.container.addEventListener('touchend', end);
+        this.container.addEventListener('touchleave',
+            <(e: Event) => void> end);
+        this.container.addEventListener('touchcancel', end);
         this.reload = reload;
     }
 
