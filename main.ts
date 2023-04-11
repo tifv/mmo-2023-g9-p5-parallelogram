@@ -437,6 +437,9 @@ class PointerWatcher {
         } else {
             return;
         }
+        if (this.trace) {
+            this.trace.clear();
+        }
         let point = triangle === 1 ?
             this.uncut_region.point1 : this.uncut_region.point2;
         this.drag = { triangle, offset:
