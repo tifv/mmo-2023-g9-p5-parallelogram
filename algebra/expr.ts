@@ -893,11 +893,11 @@ export class MatrixBuilder {
     set_as_complete(): CompleteMatrixBuilder {
         let index = 0;
         let indices = Object.fromEntries(
-            function*(variables: Set<string>): Iterable<[string, number]> {
-                for (let name of variables) {
+            function*(this: MatrixBuilder): Iterable<[string, number]> {
+                for (let name of this.variables) {
                     yield [name, index++];
                 }
-            }(this.variables));
+            }.call(this) );
         this.variable_count = index;
         return Object.assign(this, {indices});
     }
@@ -922,13 +922,13 @@ export class MatrixBuilder {
                 object.as_covector(this.variable_count, this.indices) );
         return {
             eq: new Sparse.Matrix( this.variable_count + 1,
-                rows
-                    .filter(([, type]) => type === "eq")
-                    .map(([covector, ]) => covector) ),
+                [...filtermap( rows, ([covector, type]) =>
+                    type === "eq" ? covector : null )],
+            ),
             geq: new Sparse.Matrix( this.variable_count + 1,
-                rows
-                    .filter(([, type]) => type === "geq")
-                    .map(([covector, ]) => covector) ),
+                [...filtermap( rows, ([covector, type]) =>
+                    type === "geq" ? covector : null )],
+            ),
         };
     }
 

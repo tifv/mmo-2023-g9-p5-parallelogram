@@ -86,6 +86,11 @@ function build_uncut_region(): UncutRegion {
         origin.shift(vec1.scale(s)).shift(vec3.scale(-s)),
         [vec1.opposite(), vec2.opposite(), vec3.opposite()] )
     let uncut_region = new UncutRegion(polygon, triangle1, triangle2);
+    ( {point1: uncut_region.point1, point2: uncut_region.point2} =
+        uncut_region.find_nearest_feasible(
+          {close: uncut_region.point1}, {close: uncut_region.point2} )
+    );
+
     return uncut_region;
 }
 

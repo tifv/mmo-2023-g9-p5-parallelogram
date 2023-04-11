@@ -70,13 +70,8 @@ class NumberArray {
     ): TArray {
         return this._from_items_as( ArrayClass,
             dense.length,
-            function*(): Iterable<[number,number]> {
-                for (let [index, value] of dense.entries()) {
-                    if (Math.abs(value) < EPSILON)
-                        continue;
-                    yield [index, value];
-                }
-            }.call(this),
+            filtermap( dense, (value, index) =>
+                (Math.abs(value) < EPSILON) ? null : [index, value] ),
         );
     }
 
@@ -234,14 +229,12 @@ class NumberArray {
         if (indices.map === undefined)
             return this.add_items(unmapped_items);
         let index_map = indices.map;
-        this.add_items(function*(): Iterable<[number,number]> {
-            for (let [index, value] of unmapped_items) {
-                let new_index = index_map(index);
-                if (new_index === null)
-                    continue;
-                yield [new_index, value];
-            }
-        }.call(this));
+        this.add_items(filtermap(unmapped_items, ([index, value]) => {
+            let new_index = index_map(index);
+            if (new_index === null)
+                return null;
+            return [new_index, value];
+        }));
     }
 
 }
@@ -892,7 +885,10 @@ export class GaussianReductor {
     consistent: boolean;
     /** @property maps matrix row indices to their leader column indices */
     row_leaders: Array<number | null>;
-    column_info: Array<{eliminated_by: number}|{image_index: number}>;
+    column_info: Array<
+        {eliminated_by: number, image_index?: undefined} |
+        {image_index: number, eliminated_by?: undefined}
+    >;
     image_width: number;
     image_column_map: Array<number>;
 
@@ -958,7 +954,7 @@ export class GaussianReductor {
                 if (index >= width)
                     return [image_width, value];
                 let col_info = this.column_info[index];
-                if ("eliminated_by" in col_info)
+                if (col_info.image_index === undefined)
                     throw new Error("unreachable");
                 return [col_info.image_index, value];
             }) );
@@ -981,18 +977,20 @@ export class GaussianReductor {
             affine_form.eliminate_with({row, index: row_leader, value: 1});
         }
         return new QuadraticMatrix( image_width + 1,
-            affine_form.rows
-                .filter( (_, index) => index >= width ||
-                    "image_index" in this.column_info[index] )
-                .map(row => CoVector.from_items( this.image_width + 1,
+            [...filtermap( affine_form.rows, (row, index) => {
+                if (index < width &&
+                        this.column_info[index].image_index === undefined )
+                    return null;
+                return CoVector.from_items( this.image_width + 1,
                     row.map_items((index, value) => {
                         if (index >= width)
                             return [image_width, value];
                         let col_info = this.column_info[index];
-                        if ("eliminated_by" in col_info)
+                        if (col_info.image_index === undefined)
                             throw new Error("unreachable");
                         return [col_info.image_index, value];
-                    }) ))
+                    }) )
+            })]
         );
     }
 
@@ -1005,11 +1003,9 @@ export class GaussianReductor {
         if (vector.height != this.image_width)
             throw new DimensionError();
         let new_vector = Vector.from_items( this.width,
-            function*(this: GaussianReductor): Iterable<[number,number]> {
-                for (let [index, value] of vector.iter_items()) {
-                    yield [this.image_column_map[index], value];
-                };
-            }.call(this) );
+            itermap( vector.iter_items(), ([index, value]) =>
+                [this.image_column_map[index], value] ),
+        );
         for (let [row_index, row_leader] of this.row_leaders.entries()) {
             if (row_leader === null)
                 continue;

@@ -213,11 +213,11 @@ export class Edge {
     }
 
     substitute(
-        vertex_map: (vertex: Point) => Point,
+        get_new_vertex: (vertex: Point) => Point,
     ): Edge {
         let
-            start = vertex_map(this.start),
-            end = vertex_map(this.end);
+            start = get_new_vertex(this.start),
+            end = get_new_vertex(this.end);
         if (start === this.start && end === this.end)
             return this;
         return new Edge(start, this.delta, end);
@@ -279,11 +279,15 @@ export class Polygon {
         }
     }
 
+    get start(): Point {
+        return this.vertices[0];
+    }
     *[Symbol.iterator] (): Generator<Edge, void, undefined> {
         yield* this.edges;
     }
+
     *oriented_edges(): Generator<OrientedEdge, void, undefined> {
-        let vertex = this.vertices[0];
+        let vertex = this.start;
         for (let [index, edge] of this.edges.entries()) {
             if (edge.start === vertex) {
                 yield { edge, index,
@@ -338,44 +342,37 @@ export class Polygon {
     }
     get_vertex(index: number): Point {
         if (this.edges.length == 0)
-            return this.vertices[0];
+            return this.start;
         index = this._index_modulo(index);
         return this.vertices[index];
     }
 
     reversed(): Polygon {
-        return new Polygon(this.vertices[0], Array.from(this.edges).reverse());
+        return new Polygon(this.start, Array.from(this.edges).reverse());
     }
     shift(vector: Vector): Polygon {
-        let vertex_map: (vertex: Point) => Point; {
+        let get_new_vertex: (vertex: Point) => Point; {
             let map = new Map<Point,Point>();
             for (let vertex of this.vertices) {
                 map.set(vertex, vertex.shift(vector));
             }
-            vertex_map = (vertex) => get_or_die(map, vertex);
+            get_new_vertex = (vertex) => get_or_die(map, vertex);
         }
-        let edge_map: (edge: Edge) => Edge; {
-            let map = new Map<Edge,Edge>();
-            for (let edge of this.edges) {
-                map.set(edge, edge.substitute(vertex_map));
-            }
-            edge_map = (edge) => get_or_die(map, edge);
-        }
-        return this.substitute(vertex_map, edge_map);
+        return new Polygon( get_new_vertex(this.start),
+            this.edges.map((edge) => edge.substitute(get_new_vertex)) );
     }
 
     substitute(
-        vertex_map: (vertex: Point) => Point,
-        edge_map: (edge: Edge) => (Edge | Edge[]),
+        get_new_vertex: (vertex: Point) => Point,
+        get_new_edge: (edge: Edge) => (Edge | Edge[]),
     ): Polygon {
-        // set to true to ensure start of the generator in case of refactoring
-        let edge_changes = true;
-        function* new_edges(
-            oriented_edges: Generator<OrientedEdge, void, undefined>,
-        ): Generator<Edge, void, undefined> {
-            edge_changes = false;
+        let start = get_new_vertex(this.start);
+        let edge_changes = false;
+        let edges = [...function*(
+            oriented_edges: Iterable<OrientedEdge>,
+        ): Iterable<Edge> {
             for (let {edge, forward} of oriented_edges) {
-                let replacement = edge_map(edge);
+                let replacement = get_new_edge(edge);
                 if (replacement === edge) {
                     yield edge;
                     continue;
@@ -390,10 +387,8 @@ export class Polygon {
                 }
                 yield* replacement;
             }
-        }
-        let start = vertex_map(this.vertices[0]);
-        let edges = Array.from(new_edges(this.oriented_edges()));
-        if (start === this.vertices[0] && !edge_changes)
+        }(this.oriented_edges())];
+        if (start === this.start && !edge_changes)
             return this;
         let polygon = new Polygon(start, edges);
         return polygon;
@@ -448,7 +443,7 @@ export class Polygon {
 
     get_area(): number {
         let area = 0;
-        let first_vertex = this.vertices[0];
+        let first_vertex = this.start;
         for (let {start, vector} of this.oriented_edges()) {
             area += vector.skew(Vector.between(first_vertex, start));
         }
@@ -569,11 +564,9 @@ export class Polygon {
             runs[0].edges.unshift(...runs[4].edges);
             runs.pop();
         }
-        let [index = null] = runs
-            .map( (run, index) =>
+        let [index = null] = filtermap( runs, (run, index) =>
                 (run.direction === directions[0] && run.forward === true) ?
-                    index : null )
-            .filter(value => value !== null);
+                    index : null );
         if (index === null) {
             throw new Error("unreachable");
         }
@@ -711,24 +704,24 @@ export class PlanarGraph implements GraphLike {
         return new PlanarGraph(this.vertices, this.edges, this.faces);
     }
     substitute(
-        vertex_map: (vertex: Point) => Point,
-        edge_map: (edge: Edge) => (Edge | Edge[]),
+        get_new_vertex: (vertex: Point) => Point,
+        get_new_edge: (edge: Edge) => (Edge | Edge[]),
     ): PlanarGraph {
 
         let vertices: Point[] = [];
         for (let vertex of this.vertices) {
-            vertices.push(vertex_map(vertex));
+            vertices.push(get_new_vertex(vertex));
         }
 
         let edges: Edge[] = [];
         for (let edge of this.edges) {
-            let replacement = edge_map(edge);
+            let replacement = get_new_edge(edge);
             if (replacement instanceof Edge) {
                 edges.push(replacement);
                 continue;
             }
-            let start = vertex_map(edge.start), vertex = start;
-            let end = vertex_map(edge.end);
+            let start = get_new_vertex(edge.start), vertex = start;
+            let end = get_new_vertex(edge.end);
             let new_vertices: Point[] = [];
             for (let replacement_edge of replacement) {
                 edges.push(replacement_edge);
@@ -743,7 +736,7 @@ export class PlanarGraph implements GraphLike {
 
         let faces: Polygon[] = [];
         for (let face of this.faces) {
-            faces.push(face.substitute(vertex_map, edge_map));
+            faces.push(face.substitute(get_new_vertex, get_new_edge));
         }
         return new PlanarGraph(vertices, edges, faces);
     }
@@ -1066,7 +1059,7 @@ export class PlanarGraph implements GraphLike {
             );
             new_faces.push(new_face1);
             this._remove_face(face1);
-            _record_substitute(special_faces, face1, new_face1);
+            record_substitute(special_faces, face1, new_face1);
         }
         if (face2 !== null) {
             let index2 = face2.edges.indexOf(edge2);
@@ -1080,7 +1073,7 @@ export class PlanarGraph implements GraphLike {
             );
             new_faces.push(new_face2);
             this._remove_face(face2);
-            _record_substitute(special_faces, face2, new_face2);
+            record_substitute(special_faces, face2, new_face2);
         }
         if (this.edges.has(edge1) || this.edges.has(edge2))
             throw new Error("unreachable");
@@ -1137,8 +1130,8 @@ export class PlanarGraph implements GraphLike {
         let new_face = new Polygon(start, edges);
         this._remove_face(face1);
         this._remove_face(face2);
-        _record_substitute(special_faces, face1, null);
-        _record_substitute(special_faces, face2, null);
+        record_substitute(special_faces, face1, null);
+        record_substitute(special_faces, face2, null);
         this._add_face(new_face);
         return new_face;
     }
@@ -1191,6 +1184,13 @@ export class PlanarGraph implements GraphLike {
             iffy_edges.clear();
         }
         return special_faces;
+    }
+}
+
+function record_substitute<V>(obj: Record<string,V>, orig: V, repl: V) {
+    for (let [key, value] of Object.entries(obj)) {
+        if (value === orig)
+            obj[key] = repl;
     }
 }
 

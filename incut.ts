@@ -51,14 +51,14 @@ function construct_cut_region(
     flows: Flows,
     chooser: Chooser,
 ) {
-    let origin = uncut_region.polygon.vertices[0];
+    let origin = uncut_region.polygon.start;
     let [vec1, vec2, vec3] = Array.from(
         uncut_region.triangle1.oriented_edges()
     ).map(({vector}) => vector);
     let region = CutRegion.initial(origin, [vec1, vec2, vec3]);
     var
-        sector_start = origin,
-        sector_end = region.triangle2.vertices[0];
+        sector_start = region.triangle1.start,
+        sector_end = region.triangle2.start;
     for (let [direction, flow] of chooser.choose_order(Array.from(flows))) {
         ({region, sector_start, sector_end} =
             Incutter.incut(
@@ -480,35 +480,46 @@ class Incutter {
     regenerate_polygon(): Polygon {
         type DirectionType = (0|1|2|3);
         type Height = number | "min" | "max";
-        let numeric_height: (height: Height) => number
+        let
+            numeric_height: (height: Height) => number
             = (height: Height) => {
                 if (height == "min") return 0;
                 if (height == "max") return this.max_height;
                 return height;
-            };
-        let get_direction_type: (vector: DirectedVector) => DirectionType
+            },
+            get_direction_type: (vector: DirectedVector) => DirectionType
             = (vector: DirectedVector) => {
                 return (vector.direction === this.direction)
                     ? (vector.project(this.direction) > 0 ? 0 : 2)
                     : (vector.skew(this.direction) > 0 ? 1 : 3);
-            };
+            },
+            get_vertex_edges: (vertex: Point) =>
+                 {edges: Edge[], min: number, max: number}
+            = (vertex: Point) => {
+                let heights = get_or_die(this.vertex_height_map, vertex);
+                return {
+                    edges: get_or_die(this.new_edge_map, vertex)
+                        .slice_values(heights.min(), heights.max()),
+                    min: heights.min(),
+                    max: heights.max(),
+                };
+            },
+            get_new_edges: (edge: Edge, height: Height) => Edge | Edge[]
+            = (edge: Edge, height: Height) =>
+                get_or_die(this.edge_image_map, edge)
+                    .get(numeric_height(height));
+
         let start_preimage: [Point, Height] | undefined;
-        function* edge_generator(
-            polygon: Polygon,
-            vertex_edge_map: (vertex: Point) =>
-                {edges: Array<Edge>, min: number, max: number},
-            edge_map: (vertex: Edge, height: Height) =>
-                Edge | Array<Edge>,
-        ): Generator<Edge, void, undefined> {
+        let edges = [...function*(this: Incutter): Iterable<Edge> {
             let prev_vector: DirectedVector | null = null;
             for ( let {edge, index, forward, vector}
-                of polygon.oriented_edges() )
+                of this.polygon.oriented_edges() )
             {
                 let
                     start = forward ? edge.start : edge.end,
                     end = edge.other_end(start);
                 if (prev_vector === null) {
-                    let prev_edge = polygon.get_edge(index-1);
+                    let prev_edge = this.polygon.get_edge(index-1);
                     prev_vector = prev_edge.delta_from(
                         prev_edge.other_end(start) );
                 }
@@ -519,7 +530,7 @@ class Incutter {
                 if ( direction_type == 0 || direction_type == 2 ||
                     direction_type != prev_type
                 ) {
-                    let {edges: start_image, min, max} = vertex_edge_map(start);
+                    let {edges: start_image, min, max} = get_vertex_edges(start);
                     if (direction_type == 0 || direction_type == 1) {
                         edge_height = max;
                         start_height = min;
@@ -540,7 +551,7 @@ class Incutter {
                 }
                 if (start_preimage === undefined)
                     start_preimage = [start, start_height];
-                let edge_image = edge_map(edge, edge_height);
+                let edge_image = get_new_edges(edge, edge_height);
                 if (edge_image instanceof Edge) {
                     yield edge_image;
                 } else {
@@ -553,21 +564,7 @@ class Incutter {
                 }
                 prev_vector = vector;
             }
-        }
-        let edges = Array.from(edge_generator(
-            this.polygon,
-            (vertex) => {
-                let heights = get_or_die(this.vertex_height_map, vertex);
-                return {
-                    edges: get_or_die(this.new_edge_map, vertex)
-                        .slice_values(heights.min(), heights.max()),
-                    min: heights.min(),
-                    max: heights.max(),
-                };
-            },
-            (edge, height) => get_or_die(this.edge_image_map, edge)
-                .get(numeric_height(height)),
-        ));
+        }.call(this)];
         if (start_preimage === undefined)
             throw new Error("unreachable");
         let [start, height] = start_preimage;

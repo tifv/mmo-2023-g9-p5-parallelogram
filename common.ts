@@ -19,17 +19,25 @@ function get_or_die<K,V>(map: Map<K,V>, key: K): V {
     return value;
 }
 
-function* itermap<A,B>(values: Iterable<A>, mapper: (value: A) => B):
-    IterableIterator<B>
-{
+function* itermap<A,B>(
+    values: Iterable<A>,
+    mapper: (value: A, index: number) => B,
+): IterableIterator<B> {
+    let index = 0;
     for (let value of values)
-        yield mapper(value);
+        yield mapper(value, index++);
 }
 
-function _record_substitute<V>(obj: Record<string,V>, orig: V, repl: V) {
-    for (let [key, value] of Object.entries(obj)) {
-        if (value === orig)
-            obj[key] = repl
+function* filtermap<A,B>(
+    values: Iterable<A>,
+    mapper: (value: A, index: number) => B | null,
+): IterableIterator<B> {
+    let index = 0;
+    for (let value of values) {
+        let mapped = mapper(value, index++);
+        if (mapped === null)
+            continue;
+        yield mapped;
     }
 }
 

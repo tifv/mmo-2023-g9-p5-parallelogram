@@ -292,7 +292,8 @@ export class UncutRegion {
             constraints,
         })
         if (result.error) {
-            let error: any = new ImpossibleFlowError("Cannot find flow");
+            let error: any = new ImpossibleFlowError(
+                "Cannot find feasible position" );
             error.info = {find_flows: { uncut_region: this,
                 objective, constraints, result }};
             throw error;
