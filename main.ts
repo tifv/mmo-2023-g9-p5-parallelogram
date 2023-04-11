@@ -1,15 +1,11 @@
-const POLYGON_SIZE = Object.freeze({
-    M: 7, r: 80,
-});
-
-const SVGNS = "http://www.w3.org/2000/svg";
-
 document.addEventListener('DOMContentLoaded', function meta_main() {
     main();
 });
 
 function main() {
-    let uncut_region = build_uncut_region();
+    let uncut_region = build_uncut_region({
+        M: 7, r: 80,
+    });
     let [min, max] = DrawCoords.svg_bbox(uncut_region.bbox()),
         size = {x: max.x - min.x, y: max.y - min.y};
     min.x -= 0.1 * size.x; max.x += 0.1 * size.x;
@@ -48,8 +44,7 @@ function main() {
     reload();
 }
 
-function build_uncut_region(): UncutRegion {
-    const {M, r} = POLYGON_SIZE;
+function build_uncut_region({M, r}: {M: number, r: number}): UncutRegion {
     let origin = new Point(0, 0);
     let {polygon, directions, side_length: a} = Polygon.make_regular_even(
         origin, M, r );
@@ -496,6 +491,8 @@ class PointerWatcher {
         this.drag = null;
     }
 }
+
+const SVGNS = "http://www.w3.org/2000/svg";
 
 type MakeOptions = {
     classes?: string[] | null,
