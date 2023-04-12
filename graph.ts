@@ -28,6 +28,12 @@ export class AbstractVector extends Pair {
     project(direction: UnitVector) {
         return this.x * direction.x + this.y * direction.y;
     }
+    dot(this: Vector, other: Vector): number
+    dot(this: Vector, other: UnitVector): number
+    dot(this: UnitVector, other: UnitVector): number
+    dot(other: AbstractVector) {
+        return this.x * other.x + this.y * other.y;
+    }
     skew(this: Vector, other: Vector): number
     skew(this: Vector, other: UnitVector): number
     skew(this: UnitVector, other: UnitVector): number
@@ -502,6 +508,98 @@ export class Polygon {
             area += vector.skew(Vector.between(first_vertex, start));
         }
         return area / 2;
+    }
+    contains(point: Point, allow_border: boolean = false): boolean {
+        if (this.size < 2)
+            return allow_border ? false : point.is_equal(this.start);
+        const up = new UnitVector(1, 0);
+        let vectors = this.vertices.map( vertex =>
+            Vector.between(point, vertex) );
+        type Relative = "left" | "right" | "up" | "down";
+        let relative = vectors.map<Relative | null>((vector) => {
+            let skew = vector.skew(up);
+            if (skew > EPSILON)
+                return "left";
+            if (skew < EPSILON)
+                return "right";
+            let project = vector.project(up);
+            if (project > EPSILON)
+                return "up";
+            if (project < EPSILON)
+                return "down";
+            return null;
+        });
+        let cycles: number = 0;
+        for (let [index, vector] of vectors.entries()) {
+            let
+                prev_index = this._index_modulo(index-1),
+                prev_vector = vectors[prev_index],
+                skew = vector.skew(prev_vector),
+                are_collinear = Math.abs(skew) < EPSILON,
+                rel = relative[index], prev_rel = relative[prev_index];
+            if (
+                rel === null || prev_rel === null ||
+                are_collinear && vector.dot(prev_vector) < EPSILON
+            ) {
+                return allow_border;
+            }
+            switch (rel) {
+                case "left": switch (prev_rel) {
+                    case "left":
+                    case "down":
+                        continue;
+                    case "right":
+                        if (skew < 0)
+                            continue;
+                        // fallthrough
+                    case "up":
+                        cycles += 1;
+                        continue;
+                    default:
+                        throw new Error("unreachable")
+                }
+                case "right": switch (prev_rel) {
+                    case "right":
+                    case "up":
+                    case "down":
+                        continue;
+                    case "left":
+                        if (skew > 0)
+                            continue;
+                        cycles -= 1;
+                        continue;
+                    default:
+                        throw new Error("unreachable")
+                }
+                case "up": switch (prev_rel) {
+                    case "right":
+                    case "up":
+                        continue;
+                    case "down":
+                        return allow_border;
+                    case "left":
+                        cycles -= 1;
+                        continue;
+                    default:
+                        throw new Error("unreachable")
+                }
+                case "down": switch (prev_rel) {
+                    case "left":
+                    case "right":
+                    case "down":
+                        continue;
+                    case "up":
+                        return allow_border;
+                    default:
+                        throw new Error("unreachable")
+                }
+            }
+        }
+        if (cycles === 1)
+            return true;
+        if (cycles !== 0)
+            throw new Error("Polygon is not oriented correctly");
+        return false;
     }
 
     static from_vectors(origin: Point, vectors: Array<DirectedVector>):

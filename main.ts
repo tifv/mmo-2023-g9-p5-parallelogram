@@ -1,9 +1,11 @@
 namespace Main {
 
+class NotReallyTouchEvent {}
+
 document.addEventListener('DOMContentLoaded', function meta_main() {
     if (!globalThis.TouchEvent) {        
         // @ts-ignore
-        globalThis.TouchEvent = class NotReallyTouchEvent {};
+        globalThis.TouchEvent = NotReallyTouchEvent;
     }
 
     main();
@@ -132,15 +134,6 @@ class RegionDrawer {
                 "fill": "none",
         },
         });
-        this.face_group = makesvg("g", {
-            parent: this.svg,
-            attributes: {
-                id: "face_g",
-                "stroke": "none",
-                "fill": "white",
-                "opacity": "0",
-        },
-        });
         this.edge_group = makesvg("g", {
             parent: this.svg,
             attributes: {
@@ -148,6 +141,15 @@ class RegionDrawer {
                 "stroke": "black",
                 "stroke-width": "0.50px",
                 "stroke-linecap": "round",
+        },
+        });
+        this.face_group = makesvg("g", {
+            parent: this.svg,
+            attributes: {
+                id: "face_g",
+                "stroke": "none",
+                "fill": "white",
+                "opacity": "0",
         },
         });
         let border_group = makesvg("g", {
@@ -460,26 +462,13 @@ class PointerWatcher {
     drawer: RegionDrawer;
     container: HTMLElement;
 
-    drag: {
-        triangle: TriangleIndex,
-        offset: Vector,
-        group: SVGGElement,
-    } | null = null;
-
-    trace: {
-        point: Point,
-        face: Parallelogram,
-        cancel: () => void,
-        clear: () => void,
-    } | null = null;
-
     reload: () => void;
 
     listeners: {
         drag_start: (event: MouseEvent | TouchEvent) => void,
         drag_move : (event: MouseEvent | TouchEvent) => void,
         drag_end  : (event: MouseEvent | TouchEvent) => void,
-        face_move : (event: MouseEvent | TouchEvent) => void,
+        trace : (event: MouseEvent | TouchEvent) => void,
     };
 
     constructor( {
@@ -497,7 +486,7 @@ class PointerWatcher {
             drag_start: this.drag_start.bind(this),
             drag_move : this.drag_move .bind(this),
             drag_end  : this.drag_end  .bind(this),
-            face_move : this.face_move .bind(this),
+            trace     : this.trace     .bind(this),
         }
 
         this.drawer = drawer;
@@ -510,12 +499,11 @@ class PointerWatcher {
         }
 
         let faces = this.drawer.face_group;
-        faces.addEventListener('mousemove'  , listeners.face_move);
-        faces.addEventListener('click'      , listeners.face_move);
-        faces.addEventListener( 'touchstart', listeners.face_move,
+        faces.addEventListener('mousemove'  , listeners.trace);
+        faces.addEventListener('click'      , listeners.trace);
+        faces.addEventListener( 'touchstart', listeners.trace,
             {passive: false} );
-        faces.addEventListener( 'touchmove' ,
-            (event) => { event.preventDefault(); },
+        faces.addEventListener( 'touchmove' , listeners.trace,
             {passive: false} );
 
         this.container = document.body;
@@ -539,6 +527,13 @@ class PointerWatcher {
             y: (pointer.clientY - ctm.f) / ctm.d,
         });
     }
+
+    dragged: {
+        triangle: TriangleIndex,
+        offset: Vector,
+        group: SVGGElement,
+    } | null = null;
+
     drag_start(event: MouseEvent | TouchEvent) {
         if (event instanceof MouseEvent && event.buttons !== 1)
             return;
@@ -556,12 +551,12 @@ class PointerWatcher {
         if (triangle === null)
             return;
         event.preventDefault();
-        if (this.trace) {
-            this.trace.clear();
+        if (this.traced) {
+            this.traced.clear();
         }
         let point = this.uncut_region.points[triangle.index];
         this.drag_add_events();
-        this.drag = {
+        this.dragged = {
             triangle: triangle.index,
             offset: Vector.between(this._get_pointer_coords(event), point),
             group: triangle.group,
@@ -593,12 +588,12 @@ class PointerWatcher {
         container.removeEventListener('touchcancel', listeners.drag_end );
     }
     drag_move(event: MouseEvent | TouchEvent): void {
-        if (this.drag === null)
+        if (this.dragged === null)
             return;
         event.preventDefault();
         let point = this._get_pointer_coords(event).shift(
-            this.drag.offset );
-        if (this.drag.triangle === 1) {
+            this.dragged.offset );
+        if (this.dragged.triangle === 1) {
             let {point1} = this.uncut_region.find_nearest_feasible(
                 {close: point}, {exact: true} );
             this.uncut_region.point1 = point1;
@@ -611,35 +606,57 @@ class PointerWatcher {
         }
     }
     drag_end(event: MouseEvent | TouchEvent) {
-        if (this.drag === null)
+        if (this.dragged === null)
             return;
-        this.drag.group.classList.remove("triangle_group__dragged");
-        this.drag = null;
+        this.dragged.group.classList.remove("triangle_group__dragged");
+        this.dragged = null;
         this.drag_remove_events();
     }
-    face_move(event: MouseEvent | TouchEvent): void {
-        if (this.drag !== null)
+
+    traced: {
+        point: Point,
+        path: SVGPathElement,
+        face: Parallelogram,
+        cancel: () => void,
+        clear: () => void,
+    } | null = null;
+
+    trace(event: MouseEvent | TouchEvent): void {
+        if (this.dragged !== null)
             return;
-        let target = event.target;
-        if (target === null || !(target instanceof SVGPathElement))
-            return;
-        event.preventDefault();
-        let path = target;
-        let face = this.drawer.face_by_path.get(path);
-        if (face === undefined)
-            return;
-        let point = this._get_pointer_coords(event);
-        if (this.trace) {
-            this.trace.cancel();
+        let path: SVGPathElement, face: Parallelogram;
+        find_face: {
+            if (event instanceof TouchEvent && event.type === "touchmove") {
+                let guess = this.locate_face( event,
+                    this.traced === null ? [] :
+                        [[this.traced.path, this.traced.face]] );
+                if (guess === null)
+                    return;
+                ({path, face} = guess);
+                break find_face;
+            }
+            let target = event.target;
+            if (target === null || !(target instanceof SVGPathElement))
+                return;
+            path = target;
+            let f = this.drawer.face_by_path.get(path);
+            if (f === undefined)
+                return;
+            face = f;
         }
-        let trace = this.trace = {
-            point, face,
+        event.preventDefault();
+        let point = this._get_pointer_coords(event);
+        if (this.traced) {
+            this.traced.cancel();
+        }
+        let trace = this.traced = {
+            point, path, face,
             cancel: () => {
                 listener_removers.forEach(x => x());
-                this.trace = null;
+                this.traced = null;
             },
             clear: () => {
-                if (this.trace !== trace)
+                if (this.traced !== trace)
                     return;
                 this.drawer.redraw_trace(null);
                 trace.cancel();
@@ -652,8 +669,42 @@ class PointerWatcher {
             listener_removers.push( () =>
                 path.removeEventListener('mouseleave', trace.clear) );
         } else if (event instanceof TouchEvent) {
-            // no-op for now. Maybe here will appear a better strategy.
+            // no-op
         }
+    }
+    locate_face(
+        event: TouchEvent,
+        guesses: Array<[SVGPathElement, Parallelogram]>,
+    ): {path: SVGPathElement, face: Parallelogram} | null {
+        let point = this._get_pointer_coords(event);
+        let path: SVGPathElement, face: Parallelogram;
+        try_target: {
+            let target = event.target;
+            if (target === null || !(target instanceof SVGPathElement))
+                break try_target;
+            path = target;
+            let f = this.drawer.face_by_path.get(path);
+            if (f === undefined)
+                break try_target;
+            face = f;
+            if (face.contains(point)) {
+                return {path, face};
+            }
+        }
+        for (let [path, face] of guesses) {
+            if (!face.contains(point))
+                continue;
+            let stored_path = this.drawer.path_by_face.get(face);
+            if (stored_path !== path)
+                continue;
+            return {path, face};
+        }
+        for (let [path, face] of this.drawer.face_by_path.entries()) {
+            if (face.contains(point)) {
+                return {path, face};
+            }
+        }
+        return null;
     }
 }
 
