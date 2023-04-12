@@ -74,7 +74,10 @@ function build_uncut_region({M, r}: {M: number, r: number}): UncutRegion {
     return uncut_region;
 }
 
-type PointObj = {x: number, y: number};
+type PointObj = {
+    x: number,
+    y: number,
+};
 
 const DrawCoords = Object.freeze({
     svg_coords: (point: Point): PointObj => {
@@ -98,7 +101,7 @@ class RegionDrawer {
     triangles: Record<TriangleIndex,{
         group: SVGGElement,
         face: SVGPathElement,
-        // hint?: SVGTextElement,
+        hint: SVGElement,
     }>;
     edge_group: SVGGElement;
     face_group: SVGGElement;
@@ -158,8 +161,33 @@ class RegionDrawer {
                 "fill": "none",
             },
         });
+        let clipper = (r: number) => [
+            "M", r, r, "L", -r, r,
+            "L", -r, -r, "L", r, -r, "Z",
+        ].join(" ");
+        makesvg("defs", {
+            parent: this.svg,
+            children: [
+            makesvg("clipPath", {
+                parent: border_group,
+                attributes: {
+                    id: "hint_clip",
+                    "clip-rule": "evenodd",
+                },
+                children: [
+                makesvg("path", {attributes: {
+                    "d" : clipper(1) + " " + clipper(0.65),
+                }}),
+                ],
+            })
+            ],
+        });
         let make_triangle_group = (index: TriangleIndex) => {
-            let group = makesvg("g", {
+            let
+                group: SVGGElement,
+                face: SVGPathElement,
+                hint: SVGElement;
+            group = makesvg("g", {
                 parent: border_group,
                 attributes: {
                     id: "triangle" + index,
@@ -167,14 +195,26 @@ class RegionDrawer {
                         "rgb(  70%,  90%,  70% )" : "rgb(  70%,  70%, 100% )",
                 },
                 classes: ["triangle_group"],
+                children: [
+                    face = makesvg("path"),
+                    hint = makesvg('g', {
+                        attributes: {
+                            "visibility": "hidden",
+                        },
+                        classes: ["hint"],
+                        children: [
+                        makesvg("path", {
+                            attributes: {
+                                "d": "M 1 0 L 0 1 L -1 0 L 0 -1 Z",
+                                "clip-path": "url(#hint_clip)",
+                            },
+                            classes: ["hint--inner"],
+                        }),
+                        ],
+                    }),
+                ],
             });
-            let triangle = makesvg("path", {
-                parent: group,
-            });
-            return {
-                group: group,
-                face: triangle,
-            }
+            return { group, face, hint };
         }
         this.triangles = {
             1: make_triangle_group(1),
@@ -190,10 +230,29 @@ class RegionDrawer {
 
         this.outer_face.setAttribute( 'd',
             RegionDrawer._face_as_d(region.outer_face) );
-        let region_triangles = region.triangles;
         for (let index of TRIANGLE_INDICES) {
+            let polygon = region.triangles[index];
             this.triangles[index].face.setAttribute( 'd',
-                RegionDrawer._face_as_d(region.triangles[index]) );
+                RegionDrawer._face_as_d(polygon),
+            );
+            let hint = this.triangles[index].hint;
+            let hint_ok = false;
+            do_hint: {
+                let vertices = polygon.get_sides().map(({start}) => start);
+                if (vertices.length !== 3)
+                    break do_hint;
+                let [a, b, c] = vertices
+                let {incenter, inradius} = Point.incenter(a, b, c);
+                let coords = DrawCoords.svg_coords(incenter);
+                hint.setAttribute('transform', [
+                    "translate(" + coords.x + " " + coords.y + ")",
+                    "scale(" + (inradius / 1.5) + ")",
+                ].join(" "));
+                hint.classList.add("hint__visible");
+                hint_ok = true;
+            }
+            if (!hint_ok)
+                hint.classList.remove("hint__visible");
         }
 
         let mask = new Set<Edge|Polygon>([
@@ -224,7 +283,21 @@ class RegionDrawer {
             mask.has(face) ? null : face ));
     }
 
-    redraw_trace(start: {point: Point, face: Parallelogram} | null) {
+    private _requested_region: {region: CutRegion} | null = null;
+
+    request_redraw(region: CutRegion): void {
+        this._requested_region = {region};
+        window.requestAnimationFrame(() => {
+            if (this._requested_region === null)
+                return;
+            this.redraw(this._requested_region.region);
+            this._requested_region = null;
+        })
+    }
+
+    redraw_trace(
+        start: {point: Point, face: Parallelogram} | null,
+    ): void {
         if (start === null) {
             SVGPathProvider.clean(this.trace_group);
             this._highlight_faces(new Set());
@@ -259,6 +332,22 @@ class RegionDrawer {
         }
         path_provider.clean();
         this._highlight_faces(hightlighted_faces);
+    }
+
+    private _requested_trace: {start: Parameters<
+        (typeof RegionDrawer.prototype.redraw_trace)
+    >[0]} | null = null;
+
+    request_redraw_trace(
+        start: {point: Point, face: Parallelogram} | null,
+    ): void {
+        this._requested_trace = {start};
+        window.requestAnimationFrame(() => {
+            if (this._requested_trace === null)
+                return;
+            this.redraw_trace(this._requested_trace.start);
+            this._requested_trace = null;
+        })
     }
 
     _highlight_faces(faces: Set<Parallelogram>) {
@@ -416,8 +505,13 @@ class PointerWatcher {
         }
 
         let faces = this.drawer.face_group;
-        faces.addEventListener('mousemove', listeners.face_move);
-        faces.addEventListener('click'    , listeners.face_move);
+        faces.addEventListener('mousemove'  , listeners.face_move);
+        faces.addEventListener('click'      , listeners.face_move);
+        faces.addEventListener( 'touchstart', listeners.face_move,
+            {passive: false} );
+        faces.addEventListener( 'touchmove' ,
+            (event) => { event.preventDefault(); },
+            {passive: false} );
 
         this.container = document.body;
         this.reload = reload;
@@ -426,18 +520,23 @@ class PointerWatcher {
     svg_coords  = DrawCoords.svg_coords
     math_coords = DrawCoords.math_coords
 
-    _get_pointer_coords(event: MouseEvent | TouchEvent): Point {
+    _get_pointer_coords(event: (
+        MouseEvent | TouchEvent |
+        {clientX: number, clientY: number}
+    )): Point {
         let ctm = this.drawer.svg.getScreenCTM();
         if (ctm === null)
             throw new Error("unreachable (hopefully)");
-        let pointer = event instanceof MouseEvent ?
-            event : event.touches[0];
+        let pointer = event instanceof TouchEvent ?
+            event.touches[0] : event;
         return this.math_coords({
             x: (pointer.clientX - ctm.e) / ctm.a,
             y: (pointer.clientY - ctm.f) / ctm.d,
         });
     }
     drag_start(event: MouseEvent | TouchEvent) {
+        if (event instanceof MouseEvent && event.buttons !== 1)
+            return;
         let target = event.currentTarget;
         let triangle: (
             (typeof this.drawer.triangles)[TriangleIndex] &
@@ -519,6 +618,7 @@ class PointerWatcher {
         let target = event.target;
         if (target === null || !(target instanceof SVGPathElement))
             return;
+        event.preventDefault();
         let path = target;
         let face = this.drawer.face_by_path.get(path);
         if (face === undefined)
@@ -530,7 +630,7 @@ class PointerWatcher {
         let trace = this.trace = {
             point, face,
             cancel: () => {
-                path.removeEventListener('mouseleave', trace.clear);
+                listener_removers.forEach(x => x());
                 this.trace = null;
             },
             clear: () => {
@@ -540,8 +640,15 @@ class PointerWatcher {
                 trace.cancel();
             },
         }
+        let listener_removers = new Array<() => void>();
         this.drawer.redraw_trace({point, face});
-        path.addEventListener('mouseleave', trace.clear);
+        if (event instanceof MouseEvent) {
+            path.addEventListener('mouseleave', trace.clear);
+            listener_removers.push( () =>
+                path.removeEventListener('mouseleave', trace.clear) );
+        } else if (event instanceof TouchEvent) {
+            // no-op for now. Maybe here will appear a better strategy.
+        }
     }
 }
 
@@ -552,19 +659,24 @@ type MakeOptions = {
     attributes?: {[name: string]: any},
     style?: {[name: string]: any},
     text?: string | null,
-    children?: HTMLElement[],
+    children?: (HTMLElement|SVGElement)[],
     parent?: Node | null,
     namespace?: typeof SVGNS | null,
 }
 type MakeHTMLOptions = MakeOptions & {
+    children?: HTMLElement[],
     namespace?: null,
 }
 type MakeSVGOptions = MakeOptions & {
+    children?: SVGElement[],
+}
+type _MakeSVGOptions = MakeSVGOptions & {
+    children?: SVGElement[],
     namespace: typeof SVGNS,
 }
 
 function makehtml(tag: string, options: MakeHTMLOptions): HTMLElement;
-function makehtml(tag: string, options: MakeSVGOptions): SVGElement;
+function makehtml(tag: string, options: _MakeSVGOptions): SVGElement;
 
 function makehtml(tag: string, {
     classes = null,
@@ -599,14 +711,14 @@ function makehtml(tag: string, {
     return element;
 }
 
-function makesvg(tag: "svg",    options?: MakeOptions): SVGSVGElement
-function makesvg(tag: "g",      options?: MakeOptions): SVGGElement
-function makesvg(tag: "path",   options?: MakeOptions): SVGPathElement
-function makesvg(tag: "circle", options?: MakeOptions): SVGCircleElement
-function makesvg(tag: "text",   options?: MakeOptions): SVGTextElement
-function makesvg(tag: string,   options?: MakeOptions): SVGElement
+function makesvg(tag: "svg",    options?: MakeSVGOptions): SVGSVGElement
+function makesvg(tag: "g",      options?: MakeSVGOptions): SVGGElement
+function makesvg(tag: "path",   options?: MakeSVGOptions): SVGPathElement
+function makesvg(tag: "circle", options?: MakeSVGOptions): SVGCircleElement
+function makesvg(tag: "text",   options?: MakeSVGOptions): SVGTextElement
+function makesvg(tag: string,   options?: MakeSVGOptions): SVGElement
 
-function makesvg(tag: string, options: MakeOptions = {}): SVGElement {
+function makesvg(tag: string, options: MakeSVGOptions = {}): SVGElement {
     return makehtml( tag,
         Object.assign(options, {namespace: SVGNS}) );
 }

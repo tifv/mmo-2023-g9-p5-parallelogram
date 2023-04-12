@@ -25,23 +25,23 @@
         stroke: rgb( 100%,  65%,   0%);
         opacity: 0.5;
     }
-    /* .hint {
-        user-select: none;
-        font-family: Material Icons;
-        text-anchor: middle;
-        dominant-baseline: middle;
+    .hint {
         stroke: none;
         fill: white;
         opacity: 0.7;
     }
-    .triangle_group:hover > .hint,
-    .triangle_group.triangle_group__dragged > .hint
-    {
-        opacity: 0;
-    }
-    .hint.visible {
-        visibility: visible;
-    } */
+        .hint.hint__visible {
+            visibility: visible;
+        }
+        .triangle_group:hover > .hint > .hint--inner
+        {
+            transform: scale(1.2);
+        }
+        .triangle_group.triangle_group__dragged > .hint > .hint--inner
+        {
+            transform: scale(1.2);
+            fill: black;
+        }
 </style>
     </head>
     <body>
