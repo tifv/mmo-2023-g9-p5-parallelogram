@@ -4,6 +4,14 @@
     body {
         text-align: center;
     }
+    .github_link {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+    }
+        .github_link > img {
+            width: 30px;
+        }
     svg {
         width: clamp(300px, min(90vw, 90vh), 1000px);
         aspect-ratio: 1 / 1;
@@ -47,6 +55,15 @@
     <body>
         <svg xmlns="http://www.w3.org/2000/svg" id="canvas">
         </svg>
+        <a class="github_link"
+            href="https://github.com/tifv/mmo-2023-g9-p5-parallelogram"
+        >
+            <img
+                src="./assets/github-mark.svg"
+                alt="GitHub project"
+                onerror="this.parentNode.innerHTML='GitHub'"
+                ></img>
+        </a>
     </body>
 <script src="./parallelogram.js"></script>
 </html>

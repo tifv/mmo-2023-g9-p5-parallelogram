@@ -23,16 +23,21 @@ jobs:
         tsc --version
     - name: Create build directory
       run: |
-        mkdir ./build
-        cp page.html ./build/index.html
+        mkdir ./build ./build/assets
+        cp ./page.html ./build/index.html
     - name: Compile
       run: |
         tsc --project ./tsconfig.json \
           --sourceRoot null --sourceMap false
+    - name: Get GitHub logo
+      run: |
+        wget https://github.githubassets.com/images/modules/logos_page/github-mark.zip &&
+        unzip github-mark.zip github-mark/github-mark.svg &&
+        mv ./github-mark/github-mark.svg -t ./build/assets/ || exit 0
     - name: Upload
       uses: actions/upload-pages-artifact@v1
       with:
-        path: ./build
+        path: build
   deploy:
     name: Deploy to GitHub Pages
     needs: [build]
