@@ -48,6 +48,10 @@ export class UncutRegion {
         } = this._find_flow_sector());
     }
 
+    get triangles(): {1: Polygon, 2: Polygon} {
+        return {1: this.triangle1, 2: this.triangle2};
+    }
+
     bbox(): [Point, Point] {
         return Point.bbox(...this.polygon.vertices);
     }
@@ -131,6 +135,10 @@ export class UncutRegion {
         let old_point = this.point2;
         this.triangle2 = this.triangle2.shift(
             Vector.between(old_point, point) );
+    }
+
+    get points(): {1: Point, 2: Point} {
+        return {1: this.point1, 2: this.point2};
     }
 
     get_flow_constraints_base(): Array<Tokens> {

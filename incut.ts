@@ -14,9 +14,15 @@ class CutRegion {
         this.triangle1 = triangle1;
         this.triangle2 = triangle2;
     }
+
     get_polygon() {
         return this.outer_face.reversed();
     }
+
+    get triangles(): {1: Polygon, 2: Polygon} {
+        return {1: this.triangle1, 2: this.triangle2};
+    }
+
 
     static initial(
         origin: Point,

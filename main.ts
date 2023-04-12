@@ -1,16 +1,12 @@
+namespace Main {
+
 document.addEventListener('DOMContentLoaded', async function meta_main() {
     await main();
 });
 
-const HINT_ICON_TEXT = "open_with";
-
 async function main(): Promise<void> {
-    const M = window.matchMedia(
-        "(width >= 600px) and (height >= 600px)"
-    ).matches ? 7 : 5;
-    let uncut_region = build_uncut_region({
-        M, r: 80,
-    });
+    const M = 7, r = 80;
+    let uncut_region = build_uncut_region({M, r});
     let [min, max] = DrawCoords.svg_bbox(uncut_region.bbox()),
         size = {x: max.x - min.x, y: max.y - min.y};
     min.x -= 0.1 * size.x; max.x += 0.1 * size.x;
@@ -48,11 +44,10 @@ async function main(): Promise<void> {
 
     reload();
 
-    document.fonts.load('10px Matrial Icons', HINT_ICON_TEXT).then( () => {
-        drawer.add_drag_hints();
-    })
-
 }
+
+type TriangleIndex = 1 | 2;
+const TRIANGLE_INDICES = <TriangleIndex[]>[1, 2];
 
 function build_uncut_region({M, r}: {M: number, r: number}): UncutRegion {
     let origin = new Point(0, 0);
@@ -100,21 +95,15 @@ class RegionDrawer {
     svg: SVGSVGElement
 
     outer_face: SVGPathElement;
-    triangle1: {
+    triangles: Record<TriangleIndex,{
         group: SVGGElement,
         face: SVGPathElement,
-        hint?: SVGTextElement,
-    };
-    triangle2: {
-        group: SVGGElement,
-        face: SVGPathElement,
-        hint?: SVGTextElement,
-    };
+        // hint?: SVGTextElement,
+    }>;
     edge_group: SVGGElement;
     face_group: SVGGElement;
     trace_group: SVGGElement;
 
-    region?: CutRegion;
     graph?: PlanarGraph;
     face_by_path: Map<SVGPathElement,Parallelogram> = new Map();
     path_by_face: Map<Parallelogram,SVGPathElement> = new Map();
@@ -169,60 +158,43 @@ class RegionDrawer {
                 "fill": "none",
             },
         });
-        {
+        let make_triangle_group = (index: TriangleIndex) => {
             let group = makesvg("g", {
                 parent: border_group,
                 attributes: {
-                    "fill": "rgb(  70%,  90%,  70% )",
+                    id: "triangle" + index,
+                    "fill": index === 1 ?
+                        "rgb(  70%,  90%,  70% )" : "rgb(  70%,  70%, 100% )",
                 },
                 classes: ["triangle_group"],
             });
             let triangle = makesvg("path", {
                 parent: group,
-                attributes: {
-                    id: "triangle1",
-                },
             });
-            this.triangle1 = {
+            return {
                 group: group,
                 face: triangle,
             }
-            }
-        {
-            let group = makesvg("g", {
-                parent: border_group,
-                attributes: {
-                    "fill": "rgb(  70%,  70%, 100% )",
-                },
-                classes: ["triangle_group"],
-            });
-            let triangle = makesvg("path", {
-                parent: group,
-                attributes: {
-                    id: "triangle2",
-                },
-            });
-            this.triangle2 = {
-                group,
-                face: triangle,
-            }
         }
+        this.triangles = {
+            1: make_triangle_group(1),
+            2: make_triangle_group(2),
+        };
     };
 
     svg_coords  = DrawCoords.svg_coords
     math_coords = DrawCoords.math_coords
 
     redraw(region: CutRegion) {
-        this.region = region;
         this.graph = region.graph;
 
         this.outer_face.setAttribute( 'd',
             RegionDrawer._face_as_d(region.outer_face) );
-        this.triangle1.face.setAttribute( 'd',
-            RegionDrawer._face_as_d(region.triangle1) );
-        this.triangle2.face.setAttribute( 'd',
-            RegionDrawer._face_as_d(region.triangle2) );
-        this.redraw_hints(region);
+        let region_triangles = region.triangles;
+        for (let index of TRIANGLE_INDICES) {
+            this.triangles[index].face.setAttribute( 'd',
+                RegionDrawer._face_as_d(region.triangles[index]) );
+        }
 
         let mask = new Set<Edge|Polygon>([
             ...region.outer_face, region.outer_face,
@@ -250,40 +222,6 @@ class RegionDrawer {
             },
         ).use_with_each(filtermap( this.graph.faces, (face) =>
             mask.has(face) ? null : face ));
-    }
-
-    redraw_hints(region?: CutRegion) {
-        let
-            hint1 = this.triangle1.hint,
-            hint2 = this.triangle2.hint;
-        let do_hint = (hint: SVGTextElement, triangle?: Polygon) => {
-            let coords: PointObj | null = null;
-            let size: number | null = null;
-            find_incenter: {
-                let vertices = triangle?.get_sides()
-                    .map(({start}) => start);
-                if (vertices === undefined || vertices.length !== 3)
-                    break find_incenter;
-                let [a, b, c] = vertices;
-                let {incenter, inradius} = Point.incenter(a, b, c);
-                coords = DrawCoords.svg_coords(incenter);
-                size = 1.5*inradius;
-            }
-            if (coords === null || size === null) {
-                hint.classList.remove('visible');
-                return;
-            }
-            hint.classList.add('visible');
-            hint.setAttribute("x", coords.x.toString());
-            hint.setAttribute("y", coords.y.toString());
-            hint.setAttribute("font-size", size.toString())
-        };
-        if (hint1 !== undefined) {
-            do_hint(hint1, region?.triangle1);
-        }
-        if (hint2 !== undefined) {
-            do_hint(hint2, region?.triangle2);
-        }
     }
 
     redraw_trace(start: {point: Point, face: Parallelogram} | null) {
@@ -369,27 +307,6 @@ class RegionDrawer {
         return path_items.join(" ");
     }
 
-    add_drag_hints() {
-        this.triangle1.hint = makesvg("text", {
-            parent: this.triangle1.group,
-            text: HINT_ICON_TEXT,
-            attributes: {
-                id: "triangle1_hint",
-                "visibility": "hidden",
-            },
-            classes: ["hint"],
-        });
-        this.triangle2.hint = makesvg("text", {
-            parent: this.triangle2.group,
-            text: HINT_ICON_TEXT,
-            attributes: {
-                id: "triangle1_hint",
-                "visibility": "hidden",
-            },
-            classes: ["hint"],
-        });
-        this.redraw_hints(this.region);
-}
 }
 
 /** Reuse DOM elements because they are kinda expensive */
@@ -444,27 +361,13 @@ class SVGPathProvider<T> {
     }
 }
 
-// fix a lack in ts 4.9.5
-interface HTMLElement {
-    addEventListener<K extends "touchleave">(
-        type: K,
-        listener: (this: HTMLElement, ev: TouchEvent) => any,
-        options?: boolean | AddEventListenerOptions,
-    ): void;
-    removeEventListener<K extends "touchleave">(
-        type: K,
-        listener: (this: HTMLElement, ev: TouchEvent) => any,
-        options?: boolean | EventListenerOptions,
-    ): void;
-}
-
 class PointerWatcher {
     uncut_region: UncutRegion;
     drawer: RegionDrawer;
     container: HTMLElement;
 
     drag: {
-        triangle: 1 | 2,
+        triangle: TriangleIndex,
         offset: Vector,
         group: SVGGElement,
     } | null = null;
@@ -504,18 +407,15 @@ class PointerWatcher {
         }
 
         this.drawer = drawer;
-        let
-            triangle1 = this.drawer.triangle1.group,
-            triangle2 = this.drawer.triangle2.group,
-            faces = this.drawer.face_group;
 
-        triangle1.addEventListener('mousedown'  , listeners.drag_start);
-        triangle1.addEventListener( 'touchstart', listeners.drag_start,
-            {passive: false} );
-        triangle2.addEventListener('mousedown'  , listeners.drag_start);
-        triangle2.addEventListener( 'touchstart', listeners.drag_start,
-            {passive: false} );
+        for (let index of TRIANGLE_INDICES) {
+            let triangle = this.drawer.triangles[index].group;
+            triangle.addEventListener('mousedown'  , listeners.drag_start);
+            triangle.addEventListener( 'touchstart', listeners.drag_start,
+                {passive: false} );
+        }
 
+        let faces = this.drawer.face_group;
         faces.addEventListener('mousemove', listeners.face_move);
         faces.addEventListener('click'    , listeners.face_move);
 
@@ -539,30 +439,30 @@ class PointerWatcher {
     }
     drag_start(event: MouseEvent | TouchEvent) {
         let target = event.currentTarget;
-        let triangle: 1|2;
-        let group: SVGGElement;
-        if (target === this.drawer.triangle1.group) {
-            triangle = 1;
-            group = this.drawer.triangle1.group;
-        } else if (target === this.drawer.triangle2.group) {
-            triangle = 2;
-            group = this.drawer.triangle2.group;
-        } else {
-            return;
+        let triangle: (
+            (typeof this.drawer.triangles)[TriangleIndex] &
+            {index: TriangleIndex}
+        ) | null = null
+        for (let index of TRIANGLE_INDICES) {
+            let t = this.drawer.triangles[index];
+            if (target === t.group) {
+                triangle = Object.assign({}, t, {index});
+            }
         }
+        if (triangle === null)
+            return;
         event.preventDefault();
         if (this.trace) {
             this.trace.clear();
         }
-        let point = triangle === 1 ?
-            this.uncut_region.point1 : this.uncut_region.point2;
+        let point = this.uncut_region.points[triangle.index];
         this.drag_add_events();
         this.drag = {
-            triangle,
+            triangle: triangle.index,
             offset: Vector.between(this._get_pointer_coords(event), point),
-            group,
+            group: triangle.group,
         };
-        group.classList.add("triangle_group__dragged");
+        triangle.group.classList.add("triangle_group__dragged");
     }
     drag_add_events() {
         let {container, listeners} = this;
@@ -699,15 +599,31 @@ function makehtml(tag: string, {
     return element;
 }
 
-function makesvg(tag: "svg", options?: MakeOptions): SVGSVGElement
-function makesvg(tag: "g", options?: MakeOptions): SVGGElement
-function makesvg(tag: "path", options?: MakeOptions): SVGPathElement
+function makesvg(tag: "svg",    options?: MakeOptions): SVGSVGElement
+function makesvg(tag: "g",      options?: MakeOptions): SVGGElement
+function makesvg(tag: "path",   options?: MakeOptions): SVGPathElement
 function makesvg(tag: "circle", options?: MakeOptions): SVGCircleElement
-function makesvg(tag: "text", options?: MakeOptions): SVGTextElement
-function makesvg(tag: string, options?: MakeOptions): SVGElement
+function makesvg(tag: "text",   options?: MakeOptions): SVGTextElement
+function makesvg(tag: string,   options?: MakeOptions): SVGElement
 
 function makesvg(tag: string, options: MakeOptions = {}): SVGElement {
     return makehtml( tag,
         Object.assign(options, {namespace: SVGNS}) );
+}
+
+}
+
+// fix a lack in ts 4.9.5
+interface HTMLElement {
+    addEventListener<K extends "touchleave">(
+        type: K,
+        listener: (this: HTMLElement, ev: TouchEvent) => any,
+        options?: boolean | AddEventListenerOptions,
+    ): void;
+    removeEventListener<K extends "touchleave">(
+        type: K,
+        listener: (this: HTMLElement, ev: TouchEvent) => any,
+        options?: boolean | EventListenerOptions,
+    ): void;
 }
 
