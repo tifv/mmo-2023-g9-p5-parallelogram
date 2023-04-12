@@ -1,15 +1,11 @@
 namespace Graphs {
 
 class Pair {
-    x: number;
-    y: number;
+    readonly x: number;
+    readonly y: number;
     constructor(x: number, y: number) {
         this.x = x;
         this.y = y;
-        // Object.defineProperties(this, {
-        //     x: {value: x, enumerable: true},
-        //     y: {value: y, enumerable: true},
-        // });
     }
     *[Symbol.iterator] () {
         yield this.x;
@@ -89,16 +85,12 @@ export class Vector extends AbstractVector {
 }
 
 export class DirectedVector extends Vector {
-    direction: Direction;
-    value: number;
+    readonly direction: Direction;
+    readonly value: number;
     constructor(direction: Direction, value: number) {
         super(direction.x * value, direction.y * value)
         this.direction = direction;
         this.value = value;
-        // Object.defineProperties(this, {
-        //     direction: {value: direction, enumerable: true},
-        //     value:     {value: value    , enumerable: true},
-        // });
     }
     scale(scale: number): DirectedVector {
         return new DirectedVector(this.direction, scale * this.value);
@@ -145,18 +137,18 @@ export class Point extends Pair {
 
     static center(
         points: Array<Point>,
-        weights: Array<number> | null,
+        weights?: Array<number>,
     ): Point {
-        if (weights !== null && points.length !== weights.length)
+        if (weights !== undefined && points.length !== weights.length)
             throw new Error("Weights must correspond to points");
-        let total_weight = weights !== null
+        let total_weight = weights !== undefined
             ? weights.reduce((s, x) => s + x, 0)
             : points.length;
         if (Math.abs(total_weight) < EPSILON)
-            throw new Error("Cannot take average of an zero-weight set");
+            throw new Error("Cannot take average of a zero-weight set");
         let x = 0, y = 0;
         for (let [index, point] of points.entries()) {
-            let weight = weights !== null ? weights[index] : 1;
+            let weight = weights !== undefined ? weights[index] : 1;
             x += point.x * weight;
             y += point.y * weight;
         }
@@ -179,9 +171,9 @@ export class Point extends Pair {
 }
 
 export class Edge {
-    start: Point;
-    delta: DirectedVector;
-    end: Point;
+    readonly start: Point;
+    readonly delta: DirectedVector;
+    readonly end: Point;
 
     // id: any = crypto.randomUUID().substring(0, 8);
 
