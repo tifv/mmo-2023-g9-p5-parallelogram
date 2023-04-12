@@ -1,10 +1,15 @@
 namespace Main {
 
-document.addEventListener('DOMContentLoaded', async function meta_main() {
-    await main();
+document.addEventListener('DOMContentLoaded', function meta_main() {
+    if (!globalThis.TouchEvent) {        
+        // @ts-ignore
+        globalThis.TouchEvent = class NotReallyTouchEvent {};
+    }
+
+    main();
 });
 
-async function main(): Promise<void> {
+function main(): void {
     const M = 7, r = 80;
     let uncut_region = build_uncut_region({M, r});
     let [min, max] = DrawCoords.svg_bbox(uncut_region.bbox()),
