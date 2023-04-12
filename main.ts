@@ -725,7 +725,7 @@ function makesvg(tag: string, options: MakeSVGOptions = {}): SVGElement {
 
 }
 
-// fix a lack in ts 4.9.5
+// fix a lack in ts definitions
 interface HTMLElement {
     addEventListener<K extends "touchleave">(
         type: K,
