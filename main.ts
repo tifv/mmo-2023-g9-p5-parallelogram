@@ -63,7 +63,7 @@ function build_uncut_region({M, r}: {M: number, r: number}): UncutRegion {
     let vec3 = new DirectedVector(dir3, -0.80*a);
     let vec2 = DirectedVector.make_direction(
         vec1.opposite().add(vec3.opposite()));
-    let s = 0.6 + (M - 3) * 0.25;
+    let s = 0.6 + (M - 3) * 0.24;
     let triangle1 = Polygon.from_vectors(
         origin.shift(vec1.scale(-s)).shift(vec3.scale(s)),
         [vec1, vec2, vec3] );
