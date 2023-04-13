@@ -60,9 +60,9 @@ function build_uncut_region({M, r}: {M: number, r: number}): UncutRegion {
     let origin = new Point(0, 0);
     let {polygon, directions, side_length: a} = Polygon.make_regular_even(
         origin, M, r );
-    let dir1 = directions[1], dir3 = directions[M-1];
-    let vec1 = new DirectedVector(dir1, 0.4*a);
-    let vec3 = new DirectedVector(dir3, -0.8*a);
+    let dir1 = directions[2], dir3 = directions[M-2];
+    let vec1 = new DirectedVector(dir1, 0.50*a);
+    let vec3 = new DirectedVector(dir3, -0.80*a);
     let vec2 = DirectedVector.make_direction(
         vec1.opposite().add(vec3.opposite()));
     let s = 0.6 + (M - 3) * 0.25;
