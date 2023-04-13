@@ -206,9 +206,9 @@ class Incutter {
             c_is_zero = Math.abs(flow.c) < EPSILON;
 
         if (a_is_zero) {
-            height1 = 0;
+            height1 = start_height;
         } else if (b_is_zero && c_is_zero) {
-            height1 = max_height;
+            height1 = end_height;
         } else {
             height1 = start_height + flow.a;
         }
