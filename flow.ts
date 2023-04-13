@@ -2,7 +2,12 @@ namespace UncutFlow {
 
 class ImpossibleFlowError extends Error {}
 
-export type Flow = {a: number, b: number, c: number, sum: number};
+export type Flow = {
+    readonly a: number,
+    readonly b: number,
+    readonly c: number,
+    readonly sum: number,
+};
 export type Flows = Map<Direction, Flow>;
 
 import Tokens = Algebra.Expression.Tokens;
@@ -152,7 +157,7 @@ export class UncutRegion {
         for (let [i, vector] of this.flow_vectors.entries()) {
             let
                 {direction, value} = vector,
-                k = value > 0 ? +1 : -1;
+                k: 1 | -1 = value > 0 ? +1 : -1;
             let names = var_names.flows(i);
             map_flows(a => map_coords(x => {
                 flow_constraints[a][x].push("+", direction[x], "*", names[a]);
@@ -298,7 +303,7 @@ export class UncutRegion {
             objective: objective,
             target: "min",
             constraints,
-        })
+        });
         if (result.error) {
             let error: any = new ImpossibleFlowError(
                 "Cannot find feasible position" );
