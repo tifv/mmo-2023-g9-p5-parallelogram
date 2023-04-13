@@ -12,5 +12,8 @@ This is possible for certain positions of triangles, but not for all.
 Live version:
 https://tifv.github.io/mmo-2023-g9-p5-parallelogram/
 
+Actual 100-gon version (slow):
+https://tifv.github.io/mmo-2023-g9-p5-parallelogram/100.html
+
 This project was written by July Tikhonov;
 the code is placed in the public domain.

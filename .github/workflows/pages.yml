@@ -25,6 +25,7 @@ jobs:
       run: |
         mkdir ./build ./build/assets
         cp ./page.html ./build/index.html
+        cp ./page.html ./build/100.html
     - name: Compile
       run: |
         tsc --project ./tsconfig.json \

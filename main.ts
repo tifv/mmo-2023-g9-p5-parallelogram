@@ -1,18 +1,13 @@
 namespace Main {
 
-class NotReallyTouchEvent {}
+let TouchEvent: (typeof globalThis.TouchEvent) = (globalThis.TouchEvent)
+    ? globalThis.TouchEvent
+    : <(typeof globalThis.TouchEvent)>class NotReallyTouchEvent {};
 
-document.addEventListener('DOMContentLoaded', function meta_main() {
-    if (!globalThis.TouchEvent) {        
-        // @ts-ignore
-        globalThis.TouchEvent = NotReallyTouchEvent;
-    }
-
-    main();
-});
-
-function main(): void {
-    const M = 7, r = 80;
+export function main({sides = 14}: {sides?: number}): void {
+    if (sides % 2 !== 0)
+        throw new Error("The number of sides must be even");
+    const M = sides / 2, r = 80;
     let uncut_region = build_uncut_region({M, r});
     let [min, max] = DrawCoords.svg_bbox(uncut_region.bbox()),
         size = {x: max.x - min.x, y: max.y - min.y};
@@ -60,7 +55,10 @@ function build_uncut_region({M, r}: {M: number, r: number}): UncutRegion {
     let origin = new Point(0, 0);
     let {polygon, directions, side_length: a} = Polygon.make_regular_even(
         origin, M, r );
-    let dir1 = directions[2], dir3 = directions[M-2];
+    let
+        i1 = Math.floor(-0.5 + M / 2.5),
+        i3 = Math.floor(+0.5 + M / 4.0);
+    let dir1 = directions[i1], dir3 = directions[M-i3];
     let vec1 = new DirectedVector(dir1, 0.50*a);
     let vec3 = new DirectedVector(dir3, -0.80*a);
     let vec2 = DirectedVector.make_direction(
