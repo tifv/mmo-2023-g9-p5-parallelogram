@@ -23,7 +23,6 @@ class CutRegion {
         return {1: this.triangle1, 2: this.triangle2};
     }
 
-
     static initial(
         origin: Point,
         [vec1, vec2, vec3]:

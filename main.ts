@@ -110,6 +110,7 @@ class RegionDrawer {
         face: SVGPathElement,
         hint: SVGElement,
     }>;
+    border_group: SVGGElement;
     edge_group: SVGGElement;
     face_group: SVGGElement;
     trace_group: SVGGElement;
@@ -152,7 +153,7 @@ class RegionDrawer {
                 "opacity": "0",
         },
         });
-        let border_group = makesvg("g", {
+        this.border_group = makesvg("g", {
             parent: this.svg,
             attributes: {
                 id: "border_g",
@@ -162,7 +163,7 @@ class RegionDrawer {
         },
         });
         this.outer_face = makesvg("path", {
-            parent: border_group,
+            parent: this.border_group,
             attributes: {
                 id: "outer_face",
                 "fill": "none",
@@ -176,7 +177,7 @@ class RegionDrawer {
             parent: this.svg,
             children: [
             makesvg("clipPath", {
-                parent: border_group,
+                parent: this.border_group,
                 attributes: {
                     id: "hint_clip",
                     "clip-rule": "evenodd",
@@ -195,7 +196,7 @@ class RegionDrawer {
                 face: SVGPathElement,
                 hint: SVGElement;
             group = makesvg("g", {
-                parent: border_group,
+                parent: this.border_group,
                 attributes: {
                     id: "triangle" + index,
                     "fill": index === 1 ?
@@ -227,6 +228,9 @@ class RegionDrawer {
             1: make_triangle_group(1),
             2: make_triangle_group(2),
         };
+        // this.debug_group = makesvg("g", {
+        //     parent: this.svg,
+        // });
     };
 
     svg_coords  = DrawCoords.svg_coords
