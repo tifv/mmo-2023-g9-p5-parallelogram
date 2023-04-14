@@ -410,7 +410,7 @@ class Incutter {
         }
 
     }
-    * all_new_vertices(): Generator<Point,void,undefined> {
+    * all_new_vertices(): Iterable<Point> {
         for (let [, images] of this.vertex_image_map) {
             for (let [, image] of images) {
                 yield image;
@@ -458,7 +458,7 @@ class Incutter {
             this.new_face_map.set(edge, new_faces);
         }
     }
-    * all_new_edges(): Generator<Edge,void,undefined> {
+    * all_new_edges(): Iterable<Edge> {
         for (let [, images] of this.edge_image_map) {
             for (let [, image] of images) {
                 if (image instanceof Edge) {
@@ -489,7 +489,7 @@ class Incutter {
             this.face_image_map.set(face, new_face);
         }
     }
-    * all_new_faces(): Generator<Polygon,void,undefined> {
+    * all_new_faces(): Iterable<Polygon> {
         for (let [, image] of this.face_image_map) {
             yield image;
         }

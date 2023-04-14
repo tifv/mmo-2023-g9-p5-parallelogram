@@ -196,7 +196,7 @@ export class Edge {
         // });
     }
 
-    *[Symbol.iterator] (): Generator<Point, void, undefined> {
+    *[Symbol.iterator] (): IterableIterator<Point> {
         yield this.start;
         yield this.end;
     }
@@ -342,11 +342,11 @@ export class Polygon {
     get start(): Point {
         return this.vertices[0];
     }
-    *[Symbol.iterator] (): Generator<Edge, void, undefined> {
+    *[Symbol.iterator] (): IterableIterator<Edge> {
         yield* this.edges;
     }
 
-    *oriented_edges(): Generator<OrientedEdge, void, undefined> {
+    *oriented_edges(): Iterable<OrientedEdge> {
         let vertex = this.start;
         for (let [index, edge] of this.edges.entries()) {
             if (edge.start === vertex) {
