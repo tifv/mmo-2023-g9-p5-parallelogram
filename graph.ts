@@ -810,8 +810,8 @@ export class PlanarGraph implements GraphLike {
             throw error;
         }
     }
-    static _build_edgemap(edges: Iterable<Edge>): Map<Point,EdgeSet> {
-        let edgemap: Map<Point,EdgeSet> = new Map();
+    static _build_edgemap(edges: Iterable<Edge>): PlanarGraph["edgemap"] {
+        let edgemap: PlanarGraph["edgemap"] = new Map();
         for (let edge of edges) {
             for (let vertex of edge) {
                 let edgeset = edgemap.get(vertex);
@@ -824,14 +824,14 @@ export class PlanarGraph implements GraphLike {
         }
         return edgemap;
     }
-    vertex_edges(vertex: Point): EdgeSet {
+    get_vertex_edges(vertex: Point): EdgeSet {
         let edgeset = this.edgemap.get(vertex);
         if (edgeset === undefined)
             throw new Error("The vertex does not have an incident edge");
         return edgeset;
     }
-    static _build_facemap(faces: Iterable<Polygon>): Map<Edge,FaceSet> {
-        let facemap: Map<Edge,FaceSet> = new Map();
+    static _build_facemap(faces: Iterable<Polygon>): PlanarGraph["facemap"] {
+        let facemap: PlanarGraph["facemap"] = new Map();
         for (let face of faces) {
             for (let {edge, forward} of face.oriented_edges()) {
                 let faceset = facemap.get(edge);
@@ -849,7 +849,7 @@ export class PlanarGraph implements GraphLike {
         }
         return facemap;
     }
-    edge_faces(edge: Edge): FaceSet {
+    get_edge_faces(edge: Edge): FaceSet {
         let faceset = this.facemap.get(edge);
         if (faceset === undefined) {
             throw new Error(
@@ -1075,7 +1075,7 @@ export class PlanarGraph implements GraphLike {
             throw new Error("The face did not belong to the graph");
         let dangling_edges = new Array<Edge>();
         for (let {edge, forward} of face.oriented_edges()) {
-            let faceset = this.edge_faces(edge);
+            let faceset = this.get_edge_faces(edge);
             let index = forward ? 0 : 1;
             if (faceset[index] !== face)
                 throw new Error( "The incidence of face with the edge " +
@@ -1102,7 +1102,7 @@ export class PlanarGraph implements GraphLike {
             throw new Error("The edge did not belong to the graph");
         let dangling_vertices = new Array<Point>();
         for (let vertex of edge) {
-            let edgeset = this.vertex_edges(vertex);
+            let edgeset = this.get_vertex_edges(vertex);
             let index = edgeset.indexOf(edge);
             if (index < 0)
                 throw new Error( "The incidence of edge with the vertex " +
@@ -1168,7 +1168,7 @@ export class PlanarGraph implements GraphLike {
     _join_edges( vertex: Point,
         special_faces: Record<string,Polygon>,
     ): Edge {
-        let edgeset = this.vertex_edges(vertex);
+        let edgeset = this.get_vertex_edges(vertex);
         if (edgeset.length !== 2) {
             throw new Error("Can only join two adjacent edges");
         }
@@ -1189,8 +1189,8 @@ export class PlanarGraph implements GraphLike {
         }
         let start = edge1.start, end = edge2.end;
         let
-            faceset1 = this.edge_faces(edge1),
-            faceset2 = this.edge_faces(edge2);
+            faceset1 = this.get_edge_faces(edge1),
+            faceset2 = this.get_edge_faces(edge2);
         if (faceset1[0] !== faceset2[0] || faceset1[1] !== faceset2[1]) {
             throw new Error("unreachable");
         }
@@ -1242,7 +1242,7 @@ export class PlanarGraph implements GraphLike {
     _join_parallelograms( edge: Edge,
         special_faces: Record<string,Polygon>,
     ): Polygon {
-        let [face1, face2] = this.edge_faces(edge);
+        let [face1, face2] = this.get_edge_faces(edge);
         if (face1 === null || face2 === null)
             throw new Error("Can only join two adjacent faces");
         let
@@ -1299,7 +1299,7 @@ export class PlanarGraph implements GraphLike {
         let iffy_edges = new Set<Edge>(this.edges);
         while (iffy_vertices.size > 0 || iffy_edges.size > 0) {
             for (let vertex of iffy_vertices) {
-                let edgeset = this.vertex_edges(vertex);
+                let edgeset = this.get_vertex_edges(vertex);
                 if (edgeset.length !== 2)
                     continue;
                 let [edge1, edge2] = edgeset;
@@ -1312,7 +1312,7 @@ export class PlanarGraph implements GraphLike {
             }
             iffy_vertices.clear();
             for (let edge of iffy_edges) {
-                let [face1, face2] = this.edge_faces(edge);
+                let [face1, face2] = this.get_edge_faces(edge);
                 if (face1 === null || face2 === null)
                     continue;
                 let
@@ -1393,7 +1393,8 @@ export class PlanarGraph implements GraphLike {
                 edge = side.edges[side.edges.length - 1];
             }
             point = edge.project_along(point, trace_direction);
-            let [other_face] = this.edge_faces(edge).filter(f => f !== face);
+            let [other_face] = this.get_edge_faces(edge)
+                .filter(f => f !== face);
             if (other_face === null) {
                 face = null;
                 continue;

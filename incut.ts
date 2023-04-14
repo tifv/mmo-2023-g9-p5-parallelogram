@@ -71,7 +71,8 @@ function construct_cut_region(
                 direction, flow,
                 chooser.offspring(),
             ));
-        // region.graph.check();
+        if (false)
+            region.graph.check();
     }
     Object.assign( region,
         region.graph.reduce_parallelograms({
@@ -80,7 +81,8 @@ function construct_cut_region(
             triangle2: region.triangle2,
         }),
     );
-    // region.graph.check();
+    if (false)
+        region.graph.check();
     return region;
 }
 
@@ -244,6 +246,8 @@ class Incutter {
     ) {
         while (true) {
             heighted_graph.resolve_iffy_heights();
+            if (false)
+                heighted_graph.check();
             let floating_faces = new Array<Polygon>();
             for (let [face, height] of heighted_graph.face_heights) {
                 if (height.height === undefined)
@@ -262,7 +266,7 @@ class Incutter {
     determine_edge_heights(heighted_graph: HeightedFaceGraph) {
         for (let edge of heighted_graph.edges) {
             let edge_heights: NumberSet = new NumberSet();
-            for (let face of heighted_graph.edge_faces(edge)) {
+            for (let face of heighted_graph.get_edge_faces(edge)) {
                 if (face === null)
                     continue;
                 let face_height =
@@ -283,7 +287,7 @@ class Incutter {
     determine_vertex_heights() {
         for (let vertex of this.graph.vertices) {
             let heights: NumberSet = new NumberSet();
-            for (let edge of this.graph.vertex_edges(vertex)) {
+            for (let edge of this.graph.get_vertex_edges(vertex)) {
                 let edge_heights = get_or_die(this.edge_height_map, edge);
                 for (let height of edge_heights)
                     heights.add(height);
@@ -602,14 +606,16 @@ class Incutter {
     }
 }
 
+type RelativeSet = {
+    above: Polygon[],
+    below: Polygon[],
+};
+
 class HeightedFaceGraph extends PlanarGraph {
     direction: Direction;
-    edge_heights: Map<Edge, HeightRange>;
     face_heights: Map<Polygon, HeightRange>;
-    iffy: {
-        edges: Set<Edge>,
-        faces: Set<Polygon>,
-    };
+    iffy_faces: Set<Polygon>;
+    relative_faces: Map<Polygon, RelativeSet>;
 
     constructor(
         vertices: Iterable<Point>,
@@ -620,61 +626,54 @@ class HeightedFaceGraph extends PlanarGraph {
     ) {
         super(vertices, edges, faces);
         this.direction = direction;
-        this.edge_heights = new Map()
-        for (let edge of this.edges) {
-            if (edge.direction === direction)
-                continue;
-            this.edge_heights.set( edge,
-                {min: 0, max: max_height} );
-            }
-        this.face_heights = new Map()
+        this.relative_faces = HeightedFaceGraph._build_relative(
+            this.facemap, this.direction );
+        this.face_heights = new Map();
         for (let face of this.faces) {
             this.face_heights.set( face,
                 {min: 0, max: max_height} );
             }
-        this.iffy = {
-            edges: new Set(),
-            faces: new Set(),
-        }
+        this.iffy_faces = new Set();
     }
 
-    /** XXX face-edge relation is kinda redundant; replace it with the
-     *  direct face-face relation. */
-
-    relative_edge_faces(edge: Edge):
-        {above: Polygon | null, below: Polygon | null}
+    static _build_relative(
+        facemap: HeightedFaceGraph["facemap"],
+        direction: Direction,
+    ):
+        HeightedFaceGraph["relative_faces"]
     {
-        if (edge.direction == this.direction)
-            throw new Error("This is a vertical edge");
-        let [below_face, above_face] = this.edge_faces(edge);
-        if (edge.direction.skew(this.direction) < 0) {
-            [below_face, above_face] = [above_face, below_face];
-        }
-        return {below: below_face, above: above_face};
-    }
-    relative_face_edges(face: Polygon):
-        {above: Edge[], below: Edge[]}
-    {
-        let
-            below_edges = new Array<Edge>(),
-            above_edges = new Array<Edge>();
-        for (let {edge, vector} of face.oriented_edges()) {
-            if (edge.direction === this.direction)
+        let relative_faces: HeightedFaceGraph["relative_faces"] = new Map();
+        for (let [edge, faceset] of facemap) {
+            if (edge.direction == direction)
                 continue;
-            if (vector.skew(this.direction) > 0) {
-                above_edges.push(edge);
-            } else {
-                below_edges.push(edge);
+            let [face1, face2] = faceset;
+            if (face1 === null || face2 === null)
+                continue;
+            let [below_face, above_face] =
+                (edge.direction.skew(direction) > 0) ?
+                    [face1, face2] : [face2, face1];
+            let
+                above_rel = relative_faces.get(above_face),
+                below_rel = relative_faces.get(below_face);
+            if (above_rel === undefined) {
+                relative_faces.set( above_face,
+                    above_rel = {above: [], below: []} );
             }
+            if (below_rel === undefined) {
+                relative_faces.set( below_face,
+                    below_rel = {above: [], below: []} );
+            }
+            above_rel.below.push(below_face);
+            below_rel.above.push(above_face);
         }
-        return {below: below_edges, above: above_edges};
+        return relative_faces;
     }
 
-    get_edge_height(edge: Edge): HeightRange | null {
-        let height = this.edge_heights.get(edge);
-        if (height === undefined)
-            return null;
-        return height;
+    get_relative_faces(face: Polygon): RelativeSet {
+        let relative_set = this.relative_faces.get(face);
+        if (relative_set === undefined)
+            throw new Error("The face does not have relative faces");
+        return relative_set;
     }
     get_face_height(face: Polygon): HeightRange {
         let height = this.face_heights.get(face);
@@ -691,53 +690,48 @@ class HeightedFaceGraph extends PlanarGraph {
             throw new Error("Impossible height");
         }
         height.height = height.max = height.min = h;
-        this._mark_face_edges_iffy(face);
+        this._mark_adjacent_faces_iffy(face);
     }
 
     resolve_iffy_heights(): void {
-        while (
-            this.iffy.edges.size > 0 ||
-            this.iffy.faces.size > 0
-        ) {
-            this._resolve_iffy_edges();
+        while (this.iffy_faces.size > 0) {
             this._resolve_iffy_faces();
         }
     }
-    _mark_edge_faces_iffy(edge: Edge) {
-        for (let face of this.edge_faces(edge)) {
-            if (face === null)
-                continue;
-            this.iffy.faces.add(face);
+    _mark_adjacent_faces_iffy(face: Polygon): void {
+        let relative_faces = this.get_relative_faces(face);
+        for (let face of relative_faces.above) {
+            this.iffy_faces.add(face);
         }
-    }
-    _mark_face_edges_iffy(face: Polygon) {
-        for (let edge of face) {
-            this.iffy.edges.add(edge);
+        for (let face of relative_faces.below) {
+            this.iffy_faces.add(face);
         }
     }
 
-    _resolve_iffy_edges(): void {
-        for (let edge of this.iffy.edges) {
-            if (edge.direction === this.direction)
-                continue;
-            let height = this.get_edge_height(edge);
-            if (height == null)
-                throw new Error("unreachable");
+    _resolve_iffy_faces(): void {
+        let iffy = this.iffy_faces;
+        this.iffy_faces = new Set();
+        for (let face of iffy) {
+            let height = this.get_face_height(face);
             let height_changed = false;
             update_height: {
                 if (height.height !== undefined)
                     break update_height;
-                let {below: below_face, above: above_face}
-                    = this.relative_edge_faces(edge);
-                if (below_face !== null) {
-                    let face_height = this.get_face_height(below_face);
+                let {below, above} = this.get_relative_faces(face);
+                let [below_heights, above_heights] =
+                    [below, above].map(faces => faces.map(face => {
+                        let face_height = this.get_face_height(face);
+                        if (face_height === null)
+                            throw new Error("unreachable");
+                        return <[Polygon,HeightRange]>[face, face_height];
+                    }));
+                for (let [, face_height] of below_heights) {
                     if (face_height.min > height.min + EPSILON) {
                         height.min = face_height.min;
                         height_changed = true;
                     }
                 }
-                if (above_face !== null) {
-                    let face_height = this.get_face_height(above_face);
+                for (let [, face_height] of above_heights) {
                     if (face_height.max < height.max - EPSILON) {
                         height.max = face_height.max;
                         height_changed = true;
@@ -745,63 +739,15 @@ class HeightedFaceGraph extends PlanarGraph {
                 }
                 if (height_changed && (height.max - height.min < EPSILON)) {
                     if (height.max - height.min < -EPSILON) {
-                        throw this._inordered_heights_error({edge});
-                    }
-                    height.height = height.max = height.min
-                }
-            }
-            if (height_changed) {
-                this._mark_edge_faces_iffy(edge);
-            }
-        }
-        this.iffy.edges.clear();
-    }
-    _resolve_iffy_faces(): void {
-        for (let face of this.iffy.faces) {
-            let height = this.get_face_height(face);
-            let height_changed = false;
-            update_height: {
-                if (height.height !== undefined)
-                    break update_height;
-                let {below: below_edges, above: above_edges} =
-                    this.relative_face_edges(face);
-                let [below_heights, above_heights] =
-                    [below_edges, above_edges].map(edges => edges.map(edge => {
-                        let edge_height = this.get_edge_height(edge);
-                        if (edge_height === null)
-                            throw new Error("unreachable");
-                        return <[Edge,HeightRange]>[edge, edge_height];
-                    }));
-                for (let [edge, edge_height] of below_heights) {
-                    if (edge_height.min > height.min + EPSILON) {
-                        height.min = edge_height.min;
-                        height_changed = true;
-                    }
-                }
-                for (let [edge, edge_height] of above_heights) {
-                    if (edge_height.max < height.max - EPSILON) {
-                        height.max = edge_height.max;
-                        height_changed = true;
-                    }
-                }
-                if (height_changed && (height.max - height.min < EPSILON)) {
-                    if (height.max - height.min < -EPSILON) {
-                        throw this._inordered_heights_error({face});
+                        throw new Error("Heights are not ordered correctly");
                     }
                     height.height = height.max = height.min;
                 }
             }
             if (height_changed) {
-                this._mark_face_edges_iffy(face);
+                this._mark_adjacent_faces_iffy(face);
             }
         }
-        this.iffy.faces.clear();
-    }
-    _inordered_heights_error(additional_info: any | null = null): Error {
-        let error: any = new Error("Heights are not ordered correctly");
-        error.info = {inordered_heights:
-            Object.assign({graph: this}, additional_info) };
-        return error;
     }
 
     check(options?: {[name: string]: boolean, return_errors: true}):
@@ -826,69 +772,51 @@ class HeightedFaceGraph extends PlanarGraph {
             return_errors: true,
         });
         if (above_relation_broken) {
-            let edge_above_face = new BiMap<Edge,Polygon,boolean>();
-            for (let edge of this.edges) {
-                if (edge.direction === this.direction)
-                    continue;
-                let {below: below_face, above: above_face} =
-                    this.relative_edge_faces(edge);
-                if (below_face !== null)
-                    edge_above_face.set2(edge, below_face, true);
-                if (above_face !== null)
-                    edge_above_face.set2(edge, above_face, false);
-            }
-            let face_above_edge = new BiMap<Polygon,Edge,boolean>();
+            let face_above_face = new BiMap<Polygon,Polygon,boolean>();
             for (let face of this.faces) {
-                let {below: below_edges, above: above_edges} =
-                    this.relative_face_edges(face);
-                for (let edge of below_edges)
-                    face_above_edge.set2(face, edge, true);
-                for (let edge of above_edges)
-                    face_above_edge.set2(face, edge, false);
-
+                let {below, above} = this.get_relative_faces(face);
+                for (let f of below) {
+                    face_above_face.set2(face, f, false);
+                }
+                for (let f of above) {
+                    face_above_face.set2(face, f, true);
+                }
             }
-            let broken_incidences = new Array<[Edge,Polygon]>();
-            for (let [edge, face, above1] of edge_above_face.entries2()) {
-                let above2 = face_above_edge.get2(face, edge);
+            let broken_adjacencies = new Array<[Polygon,Polygon]>();
+            for (let [face1, face2, above1] of face_above_face.entries2()) {
+                let above2 = face_above_face.get2(face2, face1);
                 if (above2 === undefined || above2 == above1) {
-                    broken_incidences.push([edge,face]);
+                    broken_adjacencies.push([face1, face2]);
                 }
             }
-            for (let [face, edge, above2] of face_above_edge.entries2()) {
-                let above1 = edge_above_face.get2(edge, face);
-                if (above1 === undefined) {
-                    broken_incidences.push([edge,face]);
-                }
-            }
-            if (broken_incidences.length > 0) {
-                errors.push({above_relation_broken: broken_incidences});
+            if (broken_adjacencies.length > 0) {
+                errors.push({above_relation_broken: broken_adjacencies});
             }
         }
         if (height_relation_broken) {
-            let broken_incidences = new Array<[Edge,Polygon]>();
+            let broken_adjacencies = new Array<[Polygon,Polygon]>();
             for (let face of this.faces) {
                 let face_height = this.get_face_height(face);
-                let {below: below_edges, above: above_edges} =
-                    this.relative_face_edges(face);
-                for (let edge of below_edges) {
-                    let edge_height = this.get_edge_height(edge);
-                    if (edge_height === null)
+                let {below, above} = this.get_relative_faces(face);
+                for (let f of below) {
+                    let f_height = this.get_face_height(f);
+                    if (f_height === null)
                         throw new Error("unreachable");
-                    if (face_height.min < edge_height.min - EPSILON) {
-                        broken_incidences.push([edge, face]);
+                    if (face_height.min < f_height.min - EPSILON) {
+                        broken_adjacencies.push([face, f]);
                     }
                 }
-                for (let edge of above_edges) {
-                    let edge_height = this.get_edge_height(edge);
-                    if (edge_height === null)
+                for (let f of above) {
+                    let f_height = this.get_face_height(f);
+                    if (f_height === null)
                         throw new Error("unreachable");
-                    if (face_height.max > edge_height.max + EPSILON) {
-                        broken_incidences.push([edge, face]);
+                    if (face_height.max > f_height.max + EPSILON) {
+                        broken_adjacencies.push([face, f]);
                     }
                 }
             }
-            if (broken_incidences.length > 0) {
-                errors.push({height_relation_broken: broken_incidences});
+            if (broken_adjacencies.length > 0) {
+                errors.push({height_relation_broken: broken_adjacencies});
             }
         }
         if (return_errors)
