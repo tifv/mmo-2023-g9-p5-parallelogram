@@ -24,8 +24,12 @@ jobs:
     - name: Create build directory
       run: |
         mkdir ./build ./build/assets
+    - name: Copy static files
+      run: |
         cp ./page.html ./build/index.html
+        cp ./page.html ./build/10.html
         cp ./page.html ./build/100.html
+        cp ./svg-override.css ./build/
     - name: Compile
       run: |
         tsc --project ./tsconfig.json \
