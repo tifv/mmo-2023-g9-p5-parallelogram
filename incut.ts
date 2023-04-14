@@ -106,6 +106,7 @@ class Incutter {
     vertex_groups: Set<Point|VertexGroup> = new Set();
 
     vertex_image_map: Map<Point,NumberMap<Point>> = new Map();
+    /** only guaranteed to be set for vertices with more than one height */
     new_edge_map: Map<Point,SlicedArray<Edge>> = new Map();
     edge_image_map: Map<Edge,NumberMap<Edge|Edge[]>> = new Map();
     new_face_map: Map<Edge,Polygon[]> = new Map();
@@ -322,13 +323,27 @@ class Incutter {
     }
     generate_vertex_images(): void {
         for (let vertex_group of this.vertex_groups) {
-            this.generate_vertex_group_images(
-                vertex_group instanceof Point ?
-                    {vertices: [vertex_group], edges: []} : vertex_group
-            );
+            if (vertex_group instanceof Point) {
+                this.generate_vertex_image(vertex_group);
+            } else {
+                this.generate_vertex_group_images(vertex_group);
+            }
         }
     }
-    generate_vertex_group_images ({vertices, edges}: VertexGroup): void
+    generate_vertex_image(vertex: Point): void {
+        let heights = get_or_die(this.vertex_height_map, vertex);
+        if (heights.length !== 1) {
+            return this.generate_vertex_group_images(
+                {vertices: [vertex], edges: []});
+        }
+        let [height] = heights;
+        let image = height <= EPSILON ? vertex : vertex.shift(
+            new DirectedVector(this.direction, height) );
+        let v_images = new NumberMap<Point>();
+        v_images.push([height, image]);
+        this.vertex_image_map.set(vertex, v_images);
+    }
+    generate_vertex_group_images({vertices, edges}: VertexGroup): void
     {
 
         let projection_images = new NumberMap<Point>();
@@ -453,7 +468,7 @@ class Incutter {
                 }
             }
         }
-        for (let [, edges] of this.new_edge_map) {
+        for (let edges of this.new_edge_map.values()) {
             yield* edges.slice_values();
         }
     }
@@ -502,6 +517,13 @@ class Incutter {
                  {edges: Edge[], min: number, max: number}
             = (vertex: Point) => {
                 let heights = get_or_die(this.vertex_height_map, vertex);
+                if (heights.length === 1) {
+                    // unreachable in practice, but whatever
+                    let [height] = heights;
+                    return {
+                        edges: [], min: height, max: height,
+                    }
+                }
                 return {
                     edges: get_or_die(this.new_edge_map, vertex)
                         .slice_values(heights.min(), heights.max()),
