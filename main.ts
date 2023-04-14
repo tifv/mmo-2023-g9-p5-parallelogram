@@ -127,10 +127,11 @@ class RegionDrawer {
             parent: this.svg,
             attributes: {
                 id: "trace_g",
-                "stroke": "black",
+                "stroke": "rgb( 100%,  65%,   0%)",
                 "stroke-linecap": "round",
                 "stroke-linejoin": "round",
                 "fill": "none",
+                "opacity": "0.5",
         },
         });
         this.edge_group = makesvg("g", {
@@ -148,7 +149,6 @@ class RegionDrawer {
                 id: "face_g",
                 "stroke": "none",
                 "fill": "white",
-                "opacity": "0",
         },
         });
         this.border_group = makesvg("g", {
@@ -282,6 +282,7 @@ class RegionDrawer {
         new SVGPathProvider<Polygon>( this.face_group,
             (path, face) => {
                 path.setAttribute('d', RegionDrawer._face_as_d(face));
+                path.setAttribute('visibility', "hidden");
                 let parallelogram = face.as_parallelogram();
                 if (parallelogram === null)
                     return;
@@ -368,8 +369,14 @@ class RegionDrawer {
                 continue;
             if (faces.has(face)) {
                 path.classList.add('highlighted');
+                path.setAttribute("visibility", "visible");
+                path.setAttribute("fill", "rgb( 100%,  65%,   0%)");
+                path.setAttribute("opacity", "0.15");
             } else {
-                path.classList.remove('highlighted');
+                path.removeAttribute("class");
+                path.setAttribute("visibility", "hidden");
+                path.removeAttribute("fill");
+                path.removeAttribute("opacity");
             }
         }
     }

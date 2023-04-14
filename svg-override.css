@@ -1,0 +1,29 @@
+/* override SVG attributes */
+.triangle_group {
+    cursor: move;
+}
+#face_g {
+}
+    #face_g > path {
+        visibility: visible;
+    }
+    #face_g > path:not(.highlighted) {
+        opacity: 0;
+    }
+.hint {
+    stroke: none;
+    fill: white;
+    opacity: 0.7;
+}
+    .hint.hint__visible {
+        visibility: visible;
+    }
+    .triangle_group:hover > .hint > .hint--inner
+    {
+        transform: scale(1.2);
+    }
+    .triangle_group.triangle_group__dragged > .hint > .hint--inner
+    {
+        transform: scale(1.2);
+        fill: black;
+    }
